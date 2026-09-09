@@ -1,0 +1,76 @@
+name: Import Legacy Workbook - Develop
+
+on:
+  workflow_dispatch:
+
+jobs:
+  import-workbook:
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 20
+
+    steps:
+      - name: Resolve workbook
+        shell: bash
+        run: |
+          set -euo pipefail
+          REPO=/var/www/bet-analytics
+          WORKBOOK=$(find "$REPO" -maxdepth 1 -type f -iname 'Analises BET - Controle de Eventos e Balanço*' | head -n 1 || true)
+          if [ -z "${WORKBOOK:-}" ] || [ ! -f "$WORKBOOK" ]; then
+            echo "Workbook not found in $REPO"
+            exit 1
+          fi
+          echo "WORKBOOK=$WORKBOOK" >> "$GITHUB_ENV"
+          echo "REPO=$REPO" >> "$GITHUB_ENV"
+          echo "Resolved workbook: $(basename "$WORKBOOK")"
+
+      - name: Update develop checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$REPO"
+          git fetch origin main
+          git checkout main
+          git pull --ff-only origin main
+          git log -1 --oneline
+
+      - name: Start database
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$REPO"
+          POSTGRES_PORT=55432 API_PORT=18000 docker compose up -d db
+
+      - name: Build API image
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$REPO"
+          POSTGRES_PORT=55432 API_PORT=18000 docker compose build api
+
+      - name: Run migrations
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$REPO"
+          POSTGRES_PORT=55432 API_PORT=18000 docker compose run --rm --no-deps api alembic upgrade head
+
+      - name: Import workbook
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$REPO"
+          POSTGRES_PORT=55432 API_PORT=18000 docker compose run --rm --no-deps -v "$WORKBOOK:/imports/workbook.xlsx:ro" api python scripts/import_spreadsheet.py /imports/workbook.xlsx --account Betano
+
+      - name: Reconcile import
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$REPO"
+          POSTGRES_PORT=55432 API_PORT=18000 docker compose run --rm --no-deps api python scripts/reconcile_import.py
+
+      - name: Show last import run
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$REPO"
+          POSTGRES_PORT=55432 API_PORT=18000 docker compose exec -T db psql -U bet_analytics -d bet_analytics -c "SELECT id, file_name, status, rows_seen, rows_imported, rows_skipped, rows_failed, started_at, finished_at FROM import_runs ORDER BY id DESC LIMIT 3;"
