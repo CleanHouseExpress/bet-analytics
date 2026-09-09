@@ -6,6 +6,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 COPY pyproject.toml README.md ./
+COPY alembic.ini ./alembic.ini
+COPY migrations ./migrations
 COPY apps ./apps
 COPY tests ./tests
 
