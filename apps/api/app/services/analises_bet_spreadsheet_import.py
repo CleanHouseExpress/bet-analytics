@@ -1,7 +1,8 @@
 import hashlib
 import json
-from datetime import UTC, datetime, time
+from datetime import UTC, date, datetime, time
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy import text
@@ -26,6 +27,33 @@ class AnalisesBetSpreadsheetImporter(SpreadsheetImporter):
         "cash_impact": {"impacto_no_caixa", "impacto_caixa"},
     }
 
+    def reprocess_file(
+        self,
+        path: str | Path,
+        *,
+        default_competition: str = "Imported Historical Data",
+        default_season: str = "legacy",
+    ):
+        file_path = Path(path)
+        file_hash = hashlib.sha256(file_path.read_bytes()).hexdigest()
+        self.db.execute(
+            text(
+                """
+                DELETE FROM import_rows
+                WHERE import_run_id IN (
+                    SELECT id FROM import_runs WHERE file_sha256 = :file_hash
+                )
+                """
+            ),
+            {"file_hash": file_hash},
+        )
+        self.db.commit()
+        return self.import_file(
+            file_path,
+            default_competition=default_competition,
+            default_season=default_season,
+        )
+
     def _import_bet(
         self, canonical: dict[str, str], row: dict[str, Any], account_id: int
     ) -> int | None:
@@ -40,11 +68,19 @@ class AnalisesBetSpreadsheetImporter(SpreadsheetImporter):
         explicit_pl = self._as_decimal(self._value(row, canonical, "profit_loss"))
         result = self._normalize_bet_result(self._value(row, canonical, "result"))
 
-        # Neutrals are intentionally not part of the operational dataset.
         if explicit_pl == Decimal("0") or (
-            explicit_pl is None and return_amount is not None and return_amount == stake and result is None
+            explicit_pl is None
+            and return_amount is not None
+            and return_amount == stake
+            and result is None
         ):
             return None
+
+        if result is None and explicit_pl is not None:
+            if explicit_pl > 0:
+                result = "Green"
+            elif explicit_pl < 0:
+                result = "Red"
 
         profit_loss = explicit_pl
         if profit_loss is None and return_amount is not None:
@@ -178,8 +214,6 @@ class AnalisesBetSpreadsheetImporter(SpreadsheetImporter):
         is_initial = "inicial" in marker
         is_final = "final" in marker
 
-        # If neither marker exists, keep it as an ending snapshot because it is the
-        # safest representation of a point-in-time account balance.
         if not is_initial and not is_final:
             is_final = True
 
@@ -227,10 +261,6 @@ class AnalisesBetSpreadsheetImporter(SpreadsheetImporter):
         competition_id = self._ensure_competition("Imported Betting Events")
         season_id = self._ensure_season(competition_id, str(placed_at.year))
         home_score, away_score = self._parse_score(score)
-
-        # The spreadsheet contains bet time, not official kickoff. We deliberately
-        # use a day-level placeholder so all entries for the same fixture reconcile
-        # to one internal match until a provider supplies the authoritative kickoff.
         placeholder_kickoff = datetime.combine(placed_at.date(), time(12, 0), tzinfo=UTC)
 
         existing = self.db.execute(
@@ -309,6 +339,12 @@ class AnalisesBetSpreadsheetImporter(SpreadsheetImporter):
             if value not in (None, ""):
                 parts.append(f"{key}={value}")
         return " | ".join(parts) or None
+
+    @staticmethod
+    def _parse_score(value: Any) -> tuple[int | None, int | None]:
+        if isinstance(value, datetime | date):
+            return value.day, value.month
+        return SpreadsheetImporter._parse_score(value)
 
     @staticmethod
     def _parse_event_teams(event_name: str) -> tuple[str, str] | None:
