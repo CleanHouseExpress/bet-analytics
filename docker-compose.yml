@@ -6,7 +6,7 @@ services:
       POSTGRES_USER: bet_analytics
       POSTGRES_PASSWORD: bet_analytics
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -20,7 +20,7 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://bet_analytics:bet_analytics@db:5432/bet_analytics
     ports:
-      - "8000:8000"
+      - "${API_PORT:-8000}:8000"
     depends_on:
       db:
         condition: service_healthy
