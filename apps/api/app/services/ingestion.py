@@ -56,12 +56,15 @@ class FootballIngestionService:
         self,
         competition_external_id: str,
         season_external_id: str,
+        *,
+        include_fixtures: bool = True,
     ) -> SyncResult:
         run_id = self._start_sync_run(
             resource="season",
             metadata={
                 "competition_external_id": competition_external_id,
                 "season_external_id": season_external_id,
+                "include_fixtures": include_fixtures,
             },
         )
         self.db.commit()
@@ -99,26 +102,28 @@ class FootballIngestionService:
                 else:
                     result.teams_updated += 1
 
-            fixtures = await self.provider.get_fixtures(season_external_id)
-            for fixture in fixtures:
-                home_team_id = team_ids.get(fixture.home_team_external_id)
-                away_team_id = team_ids.get(fixture.away_team_external_id)
-                if home_team_id is None or away_team_id is None:
-                    raise ValueError(
-                        f"Fixture {fixture.external_id} references teams not returned for season"
-                    )
+            fixtures: list[ProviderFixture] = []
+            if include_fixtures:
+                fixtures = await self.provider.get_fixtures(season_external_id)
+                for fixture in fixtures:
+                    home_team_id = team_ids.get(fixture.home_team_external_id)
+                    away_team_id = team_ids.get(fixture.away_team_external_id)
+                    if home_team_id is None or away_team_id is None:
+                        raise ValueError(
+                            f"Fixture {fixture.external_id} references teams not returned for season"
+                        )
 
-                _, created = self._upsert_match(
-                    competition_id=competition_id,
-                    season_id=season_id,
-                    home_team_id=home_team_id,
-                    away_team_id=away_team_id,
-                    fixture=fixture,
-                )
-                if created:
-                    result.matches_created += 1
-                else:
-                    result.matches_updated += 1
+                    _, created = self._upsert_match(
+                        competition_id=competition_id,
+                        season_id=season_id,
+                        home_team_id=home_team_id,
+                        away_team_id=away_team_id,
+                        fixture=fixture,
+                    )
+                    if created:
+                        result.matches_created += 1
+                    else:
+                        result.matches_updated += 1
 
             self._finish_sync_run(
                 run_id=run_id,
