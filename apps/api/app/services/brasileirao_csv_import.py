@@ -3,7 +3,7 @@ import json
 import re
 import unicodedata
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -29,10 +29,8 @@ class BrasileiraoCsvImporter:
     def import_file(self, file_path: str | Path) -> BrasileiraoCsvImportResult:
         path = Path(file_path)
         result = BrasileiraoCsvImportResult()
-
         with path.open("r", encoding="utf-8-sig", newline="") as handle:
             rows = list(csv.DictReader(handle))
-
         if not rows:
             return result
 
@@ -46,12 +44,10 @@ class BrasileiraoCsvImporter:
 
         for row in rows:
             result.rows_seen += 1
-            round_number = self._int(row.get("round"))
-            match_date = self._date(row.get("date"))
+            round_number = self._to_int(row.get("round"))
+            match_date = self._to_date(row.get("date"))
             home_name = self._required(row.get("home_team"), "home_team")
             away_name = self._required(row.get("away_team"), "away_team")
-            home_score = self._int(row.get("home_score"))
-            away_score = self._int(row.get("away_score"))
 
             home_id, created = self._ensure_team(home_name)
             result.teams_created += int(created)
@@ -60,24 +56,27 @@ class BrasileiraoCsvImporter:
             result.teams_created += int(created)
             result.teams_reused += int(not created)
 
-            round_id = self._ensure_round(season_id, round_number) if round_number is not None else None
-            kickoff = self._kickoff(match_date, row.get("kickoff_time"))
+            round_id = None
+            if round_number is not None:
+                round_id = self._ensure_round(season_id, round_number)
+
             match_id, created = self._upsert_match(
                 competition_id=competition_id,
                 season_id=season_id,
                 round_id=round_id,
                 home_team_id=home_id,
                 away_team_id=away_id,
-                kickoff_at=kickoff,
-                home_score=home_score,
-                away_score=away_score,
-                ht_home_score=self._int(row.get("ht_home_score")),
-                ht_away_score=self._int(row.get("ht_away_score")),
+                kickoff_at=self._kickoff(match_date, row.get("kickoff_time")),
+                match_date=match_date,
+                home_score=self._to_int(row.get("home_score")),
+                away_score=self._to_int(row.get("away_score")),
+                ht_home_score=self._to_int(row.get("ht_home_score")),
+                ht_away_score=self._to_int(row.get("ht_away_score")),
             )
             result.matches_created += int(created)
             result.matches_updated += int(not created)
 
-            source_extra = {
+            provenance = {
                 "source_type": "chatgpt_research_csv",
                 "source_name": self._clean(row.get("source_name")),
                 "source_url": self._clean(row.get("source_url")),
@@ -85,19 +84,10 @@ class BrasileiraoCsvImporter:
                 "confidence": self._clean(row.get("confidence")),
                 "collected_at": self._clean(row.get("collected_at")),
             }
-
             for team_id, prefix in ((home_id, "home"), (away_id, "away")):
-                values = {
-                    "shots": self._int(row.get(f"{prefix}_shots")),
-                    "shots_on_target": self._int(row.get(f"{prefix}_shots_on_target")),
-                    "xg": self._decimal(row.get(f"{prefix}_xg")),
-                    "corners": self._int(row.get(f"{prefix}_corners")),
-                    "yellow_cards": self._int(row.get(f"{prefix}_yellow_cards")),
-                    "red_cards": self._int(row.get(f"{prefix}_red_cards")),
-                    "possession": self._decimal(row.get(f"{prefix}_possession")),
-                }
+                values = self._statistics(row, prefix)
                 if any(value is not None for value in values.values()):
-                    self._upsert_statistics(match_id, team_id, values, source_extra)
+                    self._upsert_statistics(match_id, team_id, values, provenance)
                     result.statistics_upserted += 1
 
         self.db.commit()
@@ -115,10 +105,11 @@ class BrasileiraoCsvImporter:
             text(
                 """
                 INSERT INTO competitions (
-                    name, short_name, country_code, competition_type, is_active,
-                    created_at, updated_at
-                ) VALUES (:name, 'Brasileirão', 'BRA', 'league', true, :now, :now)
-                RETURNING id
+                    name, short_name, country_code, competition_type,
+                    is_active, created_at, updated_at
+                ) VALUES (
+                    :name, 'Brasileirão', 'BRA', 'league', true, :now, :now
+                ) RETURNING id
                 """
             ),
             {"name": name, "now": now},
@@ -191,40 +182,44 @@ class BrasileiraoCsvImporter:
         ).scalar_one()
 
     def _ensure_team(self, name: str) -> tuple[int, bool]:
-        normalized = self._normalize(name)
-        rows = self.db.execute(
-            text(
-                """
-                SELECT DISTINCT t.id, t.name
-                FROM teams t
-                LEFT JOIN team_aliases a ON a.team_id = t.id
-                WHERE lower(regexp_replace(unaccent(t.name), '[^a-zA-Z0-9]+', '', 'g')) = :normalized
-                   OR lower(regexp_replace(unaccent(coalesce(a.alias, '')), '[^a-zA-Z0-9]+', '', 'g')) = :normalized
-                ORDER BY t.id
-                """
-            ),
-            {"normalized": normalized},
-        ).all()
-        if len(rows) == 1:
-            return rows[0].id, False
+        target = self._normalize(name)
+        candidates: dict[int, str] = {}
+        for row in self.db.execute(text("SELECT id, name FROM teams")).all():
+            if self._normalize(row.name) == target:
+                candidates[row.id] = row.name
+        for row in self.db.execute(
+            text("SELECT team_id, alias FROM team_aliases")
+        ).all():
+            if self._normalize(row.alias) == target:
+                candidates[row.team_id] = row.alias
 
-        # Fallback without relying on database normalization extensions.
-        all_rows = self.db.execute(text("SELECT id, name FROM teams ORDER BY id")).all()
-        matches = [row for row in all_rows if self._normalize(row.name) == normalized]
-        if len(matches) == 1:
-            return matches[0].id, False
+        if len(candidates) == 1:
+            return next(iter(candidates)), False
+        if len(candidates) > 1:
+            raise ValueError(f"Ambiguous team reconciliation for '{name}': {candidates}")
 
         now = datetime.now(UTC)
         team_id = self.db.execute(
             text(
                 """
-                INSERT INTO teams (name, short_name, country_code, created_at, updated_at)
-                VALUES (:name, NULL, 'BRA', :now, :now)
+                INSERT INTO teams (
+                    name, short_name, country_code, created_at, updated_at
+                ) VALUES (:name, NULL, 'BRA', :now, :now)
                 RETURNING id
                 """
             ),
             {"name": name, "now": now},
         ).scalar_one()
+        self.db.execute(
+            text(
+                """
+                INSERT INTO team_aliases (team_id, alias, normalized_alias)
+                VALUES (:team_id, :alias, :normalized_alias)
+                ON CONFLICT (normalized_alias) DO NOTHING
+                """
+            ),
+            {"team_id": team_id, "alias": name, "normalized_alias": target},
+        )
         return team_id, True
 
     def _upsert_match(
@@ -236,6 +231,7 @@ class BrasileiraoCsvImporter:
         home_team_id: int,
         away_team_id: int,
         kickoff_at: datetime,
+        match_date: date,
         home_score: int | None,
         away_score: int | None,
         ht_home_score: int | None,
@@ -248,7 +244,7 @@ class BrasileiraoCsvImporter:
                 WHERE season_id = :season_id
                   AND home_team_id = :home_team_id
                   AND away_team_id = :away_team_id
-                  AND kickoff_at::date = :match_date
+                  AND (kickoff_at AT TIME ZONE 'America/Sao_Paulo')::date = :match_date
                 ORDER BY id LIMIT 1
                 """
             ),
@@ -256,17 +252,24 @@ class BrasileiraoCsvImporter:
                 "season_id": season_id,
                 "home_team_id": home_team_id,
                 "away_team_id": away_team_id,
-                "match_date": kickoff_at.date(),
+                "match_date": match_date,
             },
         ).scalar_one_or_none()
         now = datetime.now(UTC)
-        winner_team_id = None
-        if home_score is not None and away_score is not None:
-            if home_score > away_score:
-                winner_team_id = home_team_id
-            elif away_score > home_score:
-                winner_team_id = away_team_id
-
+        winner_team_id = self._winner(
+            home_team_id, away_team_id, home_score, away_score
+        )
+        values = {
+            "competition_id": competition_id,
+            "round_id": round_id,
+            "kickoff_at": kickoff_at,
+            "home_score": home_score,
+            "away_score": away_score,
+            "ht_home_score": ht_home_score,
+            "ht_away_score": ht_away_score,
+            "winner_team_id": winner_team_id,
+            "now": now,
+        }
         if existing:
             self.db.execute(
                 text(
@@ -285,18 +288,7 @@ class BrasileiraoCsvImporter:
                     WHERE id = :id
                     """
                 ),
-                {
-                    "competition_id": competition_id,
-                    "round_id": round_id,
-                    "kickoff_at": kickoff_at,
-                    "home_score": home_score,
-                    "away_score": away_score,
-                    "ht_home_score": ht_home_score,
-                    "ht_away_score": ht_away_score,
-                    "winner_team_id": winner_team_id,
-                    "now": now,
-                    "id": existing,
-                },
+                {**values, "id": existing},
             )
             return existing, False
 
@@ -304,58 +296,98 @@ class BrasileiraoCsvImporter:
             text(
                 """
                 INSERT INTO matches (
-                    competition_id, season_id, round_id, home_team_id, away_team_id,
-                    kickoff_at, status, home_score, away_score, home_score_ht, away_score_ht,
+                    competition_id, season_id, round_id,
+                    home_team_id, away_team_id, kickoff_at, status,
+                    home_score, away_score, home_score_ht, away_score_ht,
                     winner_team_id, created_at, updated_at
                 ) VALUES (
-                    :competition_id, :season_id, :round_id, :home_team_id, :away_team_id,
-                    :kickoff_at, 'finished', :home_score, :away_score, :ht_home_score,
-                    :ht_away_score, :winner_team_id, :now, :now
+                    :competition_id, :season_id, :round_id,
+                    :home_team_id, :away_team_id, :kickoff_at, 'finished',
+                    :home_score, :away_score, :ht_home_score, :ht_away_score,
+                    :winner_team_id, :now, :now
                 ) RETURNING id
                 """
             ),
             {
-                "competition_id": competition_id,
+                **values,
                 "season_id": season_id,
-                "round_id": round_id,
                 "home_team_id": home_team_id,
                 "away_team_id": away_team_id,
-                "kickoff_at": kickoff_at,
-                "home_score": home_score,
-                "away_score": away_score,
-                "ht_home_score": ht_home_score,
-                "ht_away_score": ht_away_score,
-                "winner_team_id": winner_team_id,
-                "now": now,
             },
         ).scalar_one()
         return match_id, True
 
-    def _upsert_statistics(self, match_id: int, team_id: int, values: dict, extra: dict) -> None:
+    def _upsert_statistics(
+        self,
+        match_id: int,
+        team_id: int,
+        values: dict,
+        provenance: dict,
+    ) -> None:
         self.db.execute(
             text(
                 """
                 INSERT INTO match_team_statistics (
-                    match_id, team_id, period, shots, shots_on_target, xg, corners,
-                    yellow_cards, red_cards, possession, extra
+                    match_id, team_id, period, shots, shots_on_target, xg,
+                    corners, yellow_cards, red_cards, possession, extra
                 ) VALUES (
-                    :match_id, :team_id, 'FULL_TIME', :shots, :shots_on_target, :xg, :corners,
-                    :yellow_cards, :red_cards, :possession, CAST(:extra AS jsonb)
+                    :match_id, :team_id, 'FULL_TIME', :shots, :shots_on_target,
+                    :xg, :corners, :yellow_cards, :red_cards, :possession,
+                    CAST(:extra AS jsonb)
                 )
                 ON CONFLICT (match_id, team_id, period)
                 DO UPDATE SET
                     shots = COALESCE(EXCLUDED.shots, match_team_statistics.shots),
-                    shots_on_target = COALESCE(EXCLUDED.shots_on_target, match_team_statistics.shots_on_target),
+                    shots_on_target = COALESCE(
+                        EXCLUDED.shots_on_target,
+                        match_team_statistics.shots_on_target
+                    ),
                     xg = COALESCE(EXCLUDED.xg, match_team_statistics.xg),
                     corners = COALESCE(EXCLUDED.corners, match_team_statistics.corners),
-                    yellow_cards = COALESCE(EXCLUDED.yellow_cards, match_team_statistics.yellow_cards),
-                    red_cards = COALESCE(EXCLUDED.red_cards, match_team_statistics.red_cards),
-                    possession = COALESCE(EXCLUDED.possession, match_team_statistics.possession),
+                    yellow_cards = COALESCE(
+                        EXCLUDED.yellow_cards,
+                        match_team_statistics.yellow_cards
+                    ),
+                    red_cards = COALESCE(
+                        EXCLUDED.red_cards,
+                        match_team_statistics.red_cards
+                    ),
+                    possession = COALESCE(
+                        EXCLUDED.possession,
+                        match_team_statistics.possession
+                    ),
                     extra = match_team_statistics.extra || EXCLUDED.extra
                 """
             ),
-            {"match_id": match_id, "team_id": team_id, "extra": json.dumps(extra), **values},
+            {
+                "match_id": match_id,
+                "team_id": team_id,
+                "extra": json.dumps(provenance),
+                **values,
+            },
         )
+
+    def _statistics(self, row: dict[str, str], prefix: str) -> dict:
+        return {
+            "shots": self._to_int(row.get(f"{prefix}_shots")),
+            "shots_on_target": self._to_int(row.get(f"{prefix}_shots_on_target")),
+            "xg": self._to_decimal(row.get(f"{prefix}_xg")),
+            "corners": self._to_int(row.get(f"{prefix}_corners")),
+            "yellow_cards": self._to_int(row.get(f"{prefix}_yellow_cards")),
+            "red_cards": self._to_int(row.get(f"{prefix}_red_cards")),
+            "possession": self._to_decimal(row.get(f"{prefix}_possession")),
+        }
+
+    @staticmethod
+    def _winner(
+        home_id: int,
+        away_id: int,
+        home_score: int | None,
+        away_score: int | None,
+    ) -> int | None:
+        if home_score is None or away_score is None or home_score == away_score:
+            return None
+        return home_id if home_score > away_score else away_id
 
     @staticmethod
     def _required(value: str | None, field: str) -> str:
@@ -370,35 +402,38 @@ class BrasileiraoCsvImporter:
         return cleaned or None
 
     @staticmethod
-    def _int(value: str | None) -> int | None:
+    def _to_int(value: str | None) -> int | None:
         cleaned = (value or "").strip()
         if not cleaned:
             return None
         return int(Decimal(cleaned.replace(",", ".")))
 
     @staticmethod
-    def _decimal(value: str | None) -> Decimal | None:
+    def _to_decimal(value: str | None) -> Decimal | None:
         cleaned = (value or "").strip()
         if not cleaned:
             return None
         return Decimal(cleaned.replace(",", "."))
 
     @staticmethod
-    def _date(value: str | None):
+    def _to_date(value: str | None) -> date:
         cleaned = (value or "").strip()
         if not cleaned:
             raise ValueError("CSV field 'date' is required")
         return datetime.strptime(cleaned, "%Y-%m-%d").date()
 
     @staticmethod
-    def _kickoff(match_date, kickoff_time: str | None) -> datetime:
+    def _kickoff(match_date: date, kickoff_time: str | None) -> datetime:
         time_value = (kickoff_time or "12:00").strip() or "12:00"
-        local = datetime.strptime(f"{match_date.isoformat()} {time_value}", "%Y-%m-%d %H:%M")
-        local = local.replace(tzinfo=ZoneInfo("America/Sao_Paulo"))
-        return local.astimezone(UTC)
+        local = datetime.strptime(
+            f"{match_date.isoformat()} {time_value}", "%Y-%m-%d %H:%M"
+        )
+        return local.replace(tzinfo=ZoneInfo("America/Sao_Paulo")).astimezone(UTC)
 
     @staticmethod
     def _normalize(value: str) -> str:
         normalized = unicodedata.normalize("NFKD", value.lower())
-        normalized = "".join(char for char in normalized if not unicodedata.combining(char))
+        normalized = "".join(
+            char for char in normalized if not unicodedata.combining(char)
+        )
         return re.sub(r"[^a-z0-9]+", "", normalized)
