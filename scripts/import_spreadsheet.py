@@ -10,10 +10,17 @@ def main() -> None:
     parser.add_argument("--account", default="Betano")
     parser.add_argument("--competition", default="Imported Historical Data")
     parser.add_argument("--season", default="legacy")
+    parser.add_argument(
+        "--reprocess",
+        action="store_true",
+        help="Reprocess rows from the same file hash without duplicating canonical records",
+    )
     args = parser.parse_args()
 
     with SessionLocal() as db:
-        result = AnalisesBetSpreadsheetImporter(db, account_name=args.account).import_file(
+        importer = AnalisesBetSpreadsheetImporter(db, account_name=args.account)
+        method = importer.reprocess_file if args.reprocess else importer.import_file
+        result = method(
             args.file,
             default_competition=args.competition,
             default_season=args.season,
