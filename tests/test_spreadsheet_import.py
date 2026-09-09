@@ -31,7 +31,10 @@ def _build_workbook(path: Path) -> None:
             "2-1",
             "Import Test League",
             "2026",
-            "Import Test Palmeiras 22'; Import Test Flamengo 35'; Import Test Palmeiras 81'",
+            (
+                "Import Test Palmeiras 22'; Import Test Flamengo 35'; "
+                "Import Test Palmeiras 81'"
+            ),
         ]
     )
 
@@ -110,8 +113,11 @@ def test_spreadsheet_import_is_idempotent(tmp_path: Path) -> None:
             assert goal_count == 3
         finally:
             db.rollback()
-            db.execute(text("DELETE FROM import_rows WHERE sheet_name IN ('Historico Jogos', 'Apostas')"))
+            db.execute(
+                text("DELETE FROM import_rows WHERE sheet_name IN ('Historico Jogos', 'Apostas')")
+            )
             db.execute(text("DELETE FROM import_runs WHERE file_name = 'bet-import-test.xlsx'"))
+            db.execute(text("DELETE FROM bets WHERE external_bet_id = 'IMPORT-TEST-1'"))
             db.execute(text("DELETE FROM betting_accounts WHERE name = 'Import Test Betano'"))
             db.execute(
                 text(
@@ -124,6 +130,15 @@ def test_spreadsheet_import_is_idempotent(tmp_path: Path) -> None:
                 )
             )
             db.execute(text("DELETE FROM teams WHERE name LIKE 'Import Test %'"))
-            db.execute(text("DELETE FROM seasons WHERE competition_id IN (SELECT id FROM competitions WHERE name = 'Import Test League')"))
+            db.execute(
+                text(
+                    """
+                    DELETE FROM seasons
+                    WHERE competition_id IN (
+                        SELECT id FROM competitions WHERE name = 'Import Test League'
+                    )
+                    """
+                )
+            )
             db.execute(text("DELETE FROM competitions WHERE name = 'Import Test League'"))
             db.commit()
