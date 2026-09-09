@@ -1,0 +1,61 @@
+name: Develop Self-Hosted
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: develop-environment
+  cancel-in-progress: false
+
+jobs:
+  validate-develop:
+    runs-on: [self-hosted, linux, x64, bet-analytics-develop]
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show runner context
+        run: |
+          echo "hostname=$(hostname)"
+          echo "user=$(whoami)"
+          echo "commit=$(git rev-parse HEAD)"
+          docker --version
+          docker compose version
+
+      - name: Start database
+        run: docker compose up -d db
+
+      - name: Build API image
+        run: docker compose build api
+
+      - name: Run migrations
+        run: docker compose run --rm api alembic upgrade head
+
+      - name: Start API
+        run: docker compose up -d api
+
+      - name: Wait for API
+        run: |
+          for i in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8000/health >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose logs api
+          exit 1
+
+      - name: Smoke test API
+        run: |
+          curl --fail http://127.0.0.1:8000/health
+          echo
+          curl --fail http://127.0.0.1:8000/health/db
+          echo
+          curl --fail http://127.0.0.1:8000/version
+          echo
+
+      - name: Show service status
+        if: always()
+        run: docker compose ps
