@@ -37,7 +37,7 @@ jobs:
         run: docker compose build api
 
       - name: Run migrations
-        run: docker compose run --rm api alembic upgrade head
+        run: docker compose run --rm --no-deps api alembic upgrade head
 
       - name: Start API
         run: docker compose up -d api
