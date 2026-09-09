@@ -8,6 +8,22 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: bet_analytics
+          POSTGRES_USER: bet_analytics
+          POSTGRES_PASSWORD: bet_analytics
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U bet_analytics -d bet_analytics"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+psycopg://bet_analytics:bet_analytics@localhost:5432/bet_analytics
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -17,5 +33,7 @@ jobs:
         run: pip install -e ".[dev]"
       - name: Lint
         run: ruff check .
+      - name: Run migrations
+        run: alembic upgrade head
       - name: Test
         run: pytest
