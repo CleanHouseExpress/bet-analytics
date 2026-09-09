@@ -31,7 +31,11 @@ class SportmonksProvider(FootballDataProvider):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
 
-    async def _get_all(self, path: str, params: dict[str, str] | None = None) -> list[dict[str, Any]]:
+    async def _get_all(
+        self,
+        path: str,
+        params: dict[str, str] | None = None,
+    ) -> list[dict[str, Any]]:
         page = 1
         items: list[dict[str, Any]] = []
         query = dict(params or {})
