@@ -9,7 +9,7 @@ concurrency:
 
 jobs:
   validate-develop:
-    runs-on: [self-hosted, linux, x64, bet-analytics-develop]
+    runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 20
 
     steps:
