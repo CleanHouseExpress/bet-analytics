@@ -19,6 +19,7 @@ services:
     build: .
     environment:
       DATABASE_URL: postgresql+psycopg://bet_analytics:bet_analytics@db:5432/bet_analytics
+      SPORTMONKS_API_TOKEN: ${SPORTMONKS_API_TOKEN}
     ports:
       - "${API_PORT:-8000}:8000"
     depends_on:
