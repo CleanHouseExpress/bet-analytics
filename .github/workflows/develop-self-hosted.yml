@@ -11,6 +11,9 @@ jobs:
   validate-develop:
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 20
+    env:
+      POSTGRES_PORT: "55432"
+      API_PORT: "18000"
 
     steps:
       - name: Checkout
@@ -23,6 +26,9 @@ jobs:
           echo "commit=$(git rev-parse HEAD)"
           docker --version
           docker compose version
+
+      - name: Clean stale project containers
+        run: docker compose down --remove-orphans || true
 
       - name: Start database
         run: docker compose up -d db
@@ -39,7 +45,7 @@ jobs:
       - name: Wait for API
         run: |
           for i in $(seq 1 30); do
-            if curl --fail --silent http://127.0.0.1:8000/health >/dev/null; then
+            if curl --fail --silent http://127.0.0.1:${API_PORT}/health >/dev/null; then
               exit 0
             fi
             sleep 2
@@ -49,11 +55,11 @@ jobs:
 
       - name: Smoke test API
         run: |
-          curl --fail http://127.0.0.1:8000/health
+          curl --fail http://127.0.0.1:${API_PORT}/health
           echo
-          curl --fail http://127.0.0.1:8000/health/db
+          curl --fail http://127.0.0.1:${API_PORT}/health/db
           echo
-          curl --fail http://127.0.0.1:8000/version
+          curl --fail http://127.0.0.1:${API_PORT}/version
           echo
 
       - name: Show service status
