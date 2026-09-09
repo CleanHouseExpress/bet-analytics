@@ -45,7 +45,7 @@ class SportmonksProvider(FootballDataProvider):
             base_url=self.base_url,
             timeout=self.timeout,
             headers={
-                "Authorization": f"Bearer {self.api_token}",
+                "Authorization": self.api_token,
                 "Accept": "application/json",
             },
         ) as client:
