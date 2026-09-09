@@ -5,10 +5,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-COPY pyproject.toml README.md ./
-COPY alembic.ini ./alembic.ini
-COPY migrations ./migrations
+COPY pyproject.toml README.md alembic.ini ./
 COPY apps ./apps
+COPY migrations ./migrations
+COPY scripts ./scripts
 COPY tests ./tests
 
 RUN pip install --no-cache-dir .
