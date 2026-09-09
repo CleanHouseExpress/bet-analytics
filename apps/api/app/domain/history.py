@@ -1,6 +1,15 @@
 from datetime import date, datetime
 
-from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Index, String, UniqueConstraint
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from apps.api.app.core.database import Base
@@ -45,9 +54,7 @@ class Season(Base):
 
 class Team(Base):
     __tablename__ = "teams"
-    __table_args__ = (
-        Index("ix_teams_name", "name"),
-    )
+    __table_args__ = (Index("ix_teams_name", "name"),)
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(160), nullable=False)
