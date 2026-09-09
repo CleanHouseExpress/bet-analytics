@@ -64,6 +64,8 @@ class FootballIngestionService:
                 "season_external_id": season_external_id,
             },
         )
+        self.db.commit()
+
         result = SyncResult(
             provider=self.provider.name,
             competition_external_id=competition_external_id,
