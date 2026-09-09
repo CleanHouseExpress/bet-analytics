@@ -16,6 +16,7 @@ class AnalisesBetSpreadsheetImporter(SpreadsheetImporter):
         **SpreadsheetImporter.HEADER_ALIASES,
         "date": SpreadsheetImporter.HEADER_ALIASES["date"] | {"data_hora", "data/hora"},
         "score": SpreadsheetImporter.HEADER_ALIASES["score"] | {"placar_final"},
+        "result": SpreadsheetImporter.HEADER_ALIASES["result"] | {"status"},
         "event": {"evento", "event", "jogo", "partida"},
         "event_type": {"tipo_de_evento", "tipo_evento"},
         "entry_type": {"tipo_de_entrada", "tipo_entrada"},
