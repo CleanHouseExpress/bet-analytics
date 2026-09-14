@@ -39,6 +39,9 @@ class ProviderFixture:
     status: str
     home_score: int | None = None
     away_score: int | None = None
+    round_number: int | None = None
+    stage: str | None = None
+    provider_updated_at: datetime | None = None
     raw: dict[str, Any] | None = None
 
 
