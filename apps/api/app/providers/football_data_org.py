@@ -1,5 +1,5 @@
 import os
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 import httpx
@@ -19,10 +19,10 @@ FOOTBALL_DATA_BASE_URL = "https://api.football-data.org/v4"
 class FootballDataOrgProvider(FootballDataProvider):
     """Adapter for football-data.org v4.
 
-    The current provider contract addresses teams/fixtures by season_external_id.
+    The provider contract addresses teams/fixtures by ``season_external_id``.
     football-data.org exposes those resources through a competition + season-year
     pair, so season context is cached when ``get_seasons`` is called. The ingestion
-    service already follows that lifecycle (competition -> seasons -> teams -> fixtures).
+    service follows that lifecycle (competition -> seasons -> teams -> fixtures).
     """
 
     name = "football-data"
@@ -115,7 +115,7 @@ class FootballDataOrgProvider(FootballDataProvider):
         return [
             ProviderTeam(
                 external_id=str(item["id"]),
-                name=str(item["name"]),
+                name=str(item.get("shortName") or item["name"]),
                 country_code=(item.get("area") or {}).get("code"),
                 raw=item,
             )
@@ -129,6 +129,26 @@ class FootballDataOrgProvider(FootballDataProvider):
         payload = await self._get(
             f"/competitions/{competition_external_id}/matches",
             {"season": str(season_year)},
+        )
+        matches = payload.get("matches") or []
+        return [self._map_fixture(item) for item in matches]
+
+    async def get_fixtures_between(
+        self,
+        season_external_id: str,
+        date_from: date,
+        date_to: date,
+    ) -> list[ProviderFixture]:
+        competition_external_id, season_year = self._require_season_context(
+            season_external_id
+        )
+        payload = await self._get(
+            f"/competitions/{competition_external_id}/matches",
+            {
+                "season": str(season_year),
+                "dateFrom": date_from.isoformat(),
+                "dateTo": date_to.isoformat(),
+            },
         )
         matches = payload.get("matches") or []
         return [self._map_fixture(item) for item in matches]
@@ -176,6 +196,9 @@ class FootballDataOrgProvider(FootballDataProvider):
             status=str(item.get("status") or "UNKNOWN").lower(),
             home_score=self._to_int(full_time.get("home")),
             away_score=self._to_int(full_time.get("away")),
+            round_number=self._to_int(item.get("matchday")),
+            stage=str(item.get("stage")) if item.get("stage") else None,
+            provider_updated_at=self._parse_datetime(item.get("lastUpdated")),
             raw=item,
         )
 
