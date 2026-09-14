@@ -1,0 +1,51 @@
+name: Sync Future Fixtures
+
+on:
+  schedule:
+    # GitHub cron uses UTC. These times correspond to 00:05, 06:05, 12:05 and 18:05
+    # in America/Sao_Paulo (UTC-3).
+    - cron: "5 3,9,15,21 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: future-fixtures-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 20
+    env:
+      POSTGRES_PORT: "55432"
+      API_PORT: "18000"
+      FOOTBALL_DATA_API_TOKEN: ${{ secrets.FOOTBALL_DATA_API_TOKEN }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate provider secret
+        run: |
+          if [ -z "${FOOTBALL_DATA_API_TOKEN}" ]; then
+            echo "FOOTBALL_DATA_API_TOKEN secret is required"
+            exit 1
+          fi
+
+      - name: Start database
+        run: docker compose up -d db
+
+      - name: Build API image
+        run: docker compose build api
+
+      - name: Run migrations
+        run: docker compose run --rm --no-deps api alembic upgrade head
+
+      - name: Sync Brasileirão Série A future fixtures
+        run: |
+          docker compose run --rm --no-deps \
+            -e FOOTBALL_DATA_API_TOKEN="${FOOTBALL_DATA_API_TOKEN}" \
+            api python scripts/sync_future_fixtures.py --days-back 2 --days-ahead 45
+
+      - name: Show service status
+        if: always()
+        run: docker compose ps
