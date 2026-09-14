@@ -51,13 +51,59 @@ class FakeBrazilProvider(FootballDataProvider):
         raise AssertionError("catalog sync must not fetch statistics")
 
 
+def _cleanup(db) -> None:
+    db.execute(
+        text(
+            """
+            DELETE FROM matches
+            WHERE season_id IN (SELECT id FROM seasons WHERE name = '2098')
+              AND (
+                home_team_id IN (SELECT id FROM teams WHERE name LIKE 'Catalog %')
+                OR away_team_id IN (SELECT id FROM teams WHERE name LIKE 'Catalog %')
+              )
+            """
+        )
+    )
+    db.execute(
+        text("DELETE FROM external_entity_mappings WHERE provider = :p"),
+        {"p": FakeBrazilProvider.name},
+    )
+    db.execute(
+        text("DELETE FROM provider_raw_payloads WHERE provider = :p"),
+        {"p": FakeBrazilProvider.name},
+    )
+    db.execute(
+        text("DELETE FROM provider_sync_runs WHERE provider = :p"),
+        {"p": FakeBrazilProvider.name},
+    )
+    db.execute(text("DELETE FROM team_aliases WHERE alias LIKE 'Catalog %'"))
+    db.execute(text("DELETE FROM teams WHERE name LIKE 'Catalog %'"))
+    db.execute(
+        text(
+            """
+            DELETE FROM seasons
+            WHERE name = '2098'
+              AND competition_id IN (
+                SELECT id FROM competitions WHERE name = 'Brasileirão Série A'
+              )
+            """
+        )
+    )
+    db.execute(
+        text(
+            """
+            DELETE FROM competitions
+            WHERE name = 'Brasileirão Série A'
+              AND id NOT IN (SELECT competition_id FROM seasons)
+            """
+        )
+    )
+    db.commit()
+
+
 def test_catalog_sync_reuses_existing_team_and_is_idempotent() -> None:
     with SessionLocal() as db:
-        db.execute(text("DELETE FROM external_entity_mappings WHERE provider = :p"), {"p": FakeBrazilProvider.name})
-        db.execute(text("DELETE FROM team_aliases WHERE alias LIKE 'Catalog %'"))
-        db.execute(text("DELETE FROM teams WHERE name LIKE 'Catalog %'"))
-        db.execute(text("DELETE FROM seasons WHERE name = '2098'"))
-        db.execute(text("DELETE FROM competitions WHERE name = 'Brasileirão Série A' AND id NOT IN (SELECT competition_id FROM seasons)"))
+        _cleanup(db)
         existing_id = db.execute(
             text(
                 """
@@ -94,9 +140,4 @@ def test_catalog_sync_reuses_existing_team_and_is_idempotent() -> None:
         ).scalar_one()
         assert mapped_id == existing_id
 
-        db.execute(text("DELETE FROM external_entity_mappings WHERE provider = :p"), {"p": FakeBrazilProvider.name})
-        db.execute(text("DELETE FROM team_aliases WHERE alias LIKE 'Catalog %'"))
-        db.execute(text("DELETE FROM teams WHERE name LIKE 'Catalog %'"))
-        db.execute(text("DELETE FROM seasons WHERE name = '2098'"))
-        db.execute(text("DELETE FROM competitions WHERE name = 'Brasileirão Série A' AND id NOT IN (SELECT competition_id FROM seasons)"))
-        db.commit()
+        _cleanup(db)

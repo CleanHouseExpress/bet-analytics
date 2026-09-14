@@ -1,20 +1,27 @@
-from datetime import datetime
+from datetime import UTC, datetime
 
 import pytest
 
 from apps.api.app.providers.base import FootballDataProvider
 from apps.api.app.providers.factory import build_provider_registry
+from apps.api.app.providers.football_data_org import FootballDataOrgProvider
 from apps.api.app.providers.sportmonks import SportmonksProvider
 
 
-def test_provider_registry_exposes_sportmonks(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_provider_registry_exposes_supported_providers(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SPORTMONKS_API_TOKEN", "test-token")
+    monkeypatch.setenv("FOOTBALL_DATA_API_TOKEN", "test-token")
     registry = build_provider_registry()
 
-    assert registry.names == ("sportmonks",)
-    provider = registry.create("sportmonks")
-    assert isinstance(provider, FootballDataProvider)
-    assert isinstance(provider, SportmonksProvider)
+    assert registry.names == ("football-data", "sportmonks")
+
+    football_data = registry.create("football-data")
+    assert isinstance(football_data, FootballDataProvider)
+    assert isinstance(football_data, FootballDataOrgProvider)
+
+    sportmonks = registry.create("sportmonks")
+    assert isinstance(sportmonks, FootballDataProvider)
+    assert isinstance(sportmonks, SportmonksProvider)
 
 
 def test_provider_registry_rejects_unknown_provider() -> None:
@@ -29,6 +36,13 @@ def test_sportmonks_requires_token(monkeypatch: pytest.MonkeyPatch) -> None:
 
     with pytest.raises(ValueError, match="SPORTMONKS_API_TOKEN is required"):
         SportmonksProvider()
+
+
+def test_football_data_requires_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("FOOTBALL_DATA_API_TOKEN", raising=False)
+
+    with pytest.raises(ValueError, match="FOOTBALL_DATA_API_TOKEN is required"):
+        FootballDataOrgProvider()
 
 
 def test_sportmonks_maps_fixture() -> None:
@@ -59,3 +73,37 @@ def test_sportmonks_maps_fixture() -> None:
     assert fixture.status == "FT"
     assert fixture.home_score == 2
     assert fixture.away_score == 1
+
+
+def test_football_data_maps_fixture() -> None:
+    provider = FootballDataOrgProvider(api_token="test-token")
+    fixture = provider._map_fixture(
+        {
+            "id": 987654,
+            "utcDate": "2026-09-20T19:00:00Z",
+            "status": "SCHEDULED",
+            "season": {"id": 2026},
+            "homeTeam": {"id": 10, "name": "Home FC"},
+            "awayTeam": {"id": 20, "name": "Away FC"},
+            "score": {
+                "winner": None,
+                "fullTime": {"home": None, "away": None},
+            },
+        }
+    )
+
+    assert fixture.external_id == "987654"
+    assert fixture.season_external_id == "2026"
+    assert fixture.home_team_external_id == "10"
+    assert fixture.away_team_external_id == "20"
+    assert fixture.kickoff_at == datetime(2026, 9, 20, 19, 0, tzinfo=UTC)
+    assert fixture.status == "scheduled"
+    assert fixture.home_score is None
+    assert fixture.away_score is None
+
+
+def test_football_data_requires_season_discovery_before_teams_or_fixtures() -> None:
+    provider = FootballDataOrgProvider(api_token="test-token")
+
+    with pytest.raises(ValueError, match="Season context is unknown"):
+        provider._require_season_context("missing-season")

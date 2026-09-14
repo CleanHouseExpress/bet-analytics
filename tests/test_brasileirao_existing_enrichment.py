@@ -7,7 +7,6 @@ from apps.api.app.services.brasileirao_existing_enrichment import (
     BrasileiraoExistingEnrichmentImporter,
 )
 
-
 COMPETITION = "Existing Enrichment Test League"
 SEASON = "2098"
 
@@ -17,6 +16,10 @@ def _cleanup(db) -> None:
         text("SELECT id FROM competitions WHERE name = :name"), {"name": COMPETITION}
     ).scalars().all()
     if competition_ids:
+        db.execute(
+            text("DELETE FROM matches WHERE competition_id = ANY(:ids)"),
+            {"ids": competition_ids},
+        )
         db.execute(
             text("DELETE FROM competitions WHERE id = ANY(:ids)"),
             {"ids": competition_ids},
