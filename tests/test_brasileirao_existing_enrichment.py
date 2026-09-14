@@ -17,6 +17,10 @@ def _cleanup(db) -> None:
     ).scalars().all()
     if competition_ids:
         db.execute(
+            text("DELETE FROM matches WHERE competition_id = ANY(:ids)"),
+            {"ids": competition_ids},
+        )
+        db.execute(
             text("DELETE FROM competitions WHERE id = ANY(:ids)"),
             {"ids": competition_ids},
         )
