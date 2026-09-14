@@ -3,8 +3,8 @@ import asyncio
 from datetime import UTC, date, datetime, timedelta
 
 from apps.api.app.core.database import SessionLocal
-from apps.api.app.providers.football_data_org import FootballDataOrgProvider
 from apps.api.app.providers.contracts import ProviderSeason
+from apps.api.app.providers.football_data_org import FootballDataOrgProvider
 from apps.api.app.services.ingestion import FootballIngestionService
 
 BRAZIL_SERIE_A_FOOTBALL_DATA_ID = "2013"
