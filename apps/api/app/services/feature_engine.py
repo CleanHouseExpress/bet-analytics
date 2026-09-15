@@ -7,21 +7,11 @@ from time import perf_counter
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
-from apps.api.app.domain.features import (
-    FEATURE_ENGINE_VERSION,
-    CompetitionBaseline,
-    FeatureReason,
-    FeatureSet,
-    FormWindow,
-    StrengthFeatures,
-)
+from apps.api.app.domain.features import FEATURE_ENGINE_VERSION, CompetitionBaseline, FeatureReason, FeatureSet, FormWindow, StrengthFeatures
 from apps.api.app.domain.history import Match
 from apps.api.app.domain.match_context import AnalysisType, CompetitionFormat, MatchContext
 
 logger = logging.getLogger(__name__)
-
-# football-data.org is the canonical V1 fixture provider and its FINISHED status is
-# normalized to lowercase by the adapter. Do not accept guessed terminal aliases.
 FINAL_STATUSES = frozenset({"finished"})
 
 
@@ -59,16 +49,7 @@ def _form(matches: list[Match], team_id: int, limit: int) -> FormWindow:
         draws += pts == 1
         losses += pts == 0
     games = len(sample)
-    return FormWindow(
-        games=games,
-        gf_per_game=gf / games,
-        ga_per_game=ga / games,
-        points_per_game=(wins * 3 + draws) / games,
-        wins=wins,
-        draws=draws,
-        losses=losses,
-        complete=games == limit,
-    )
+    return FormWindow(games, gf / games, ga / games, (wins * 3 + draws) / games, wins, draws, losses, games == limit)
 
 
 def _eligible_query(*, competition_id: int, season_id: int, as_of: datetime):
@@ -79,6 +60,8 @@ def _eligible_query(*, competition_id: int, season_id: int, as_of: datetime):
         Match.home_score.is_not(None),
         Match.away_score.is_not(None),
         Match.status.in_(FINAL_STATUSES),
+        Match.finished_at.is_not(None),
+        Match.finished_at <= as_of,
     )
 
 
@@ -95,20 +78,10 @@ class FeatureEngine:
         kickoff = _utc(target.kickoff_at)
         if as_of >= kickoff:
             raise FeatureEngineError(FeatureReason.INVALID_AS_OF)
-        if (
-            context.competition_format != CompetitionFormat.LEAGUE_POINTS
-            or context.analysis_type != AnalysisType.PRE_MATCH
-            or context.competition_id != target.competition_id
-            or context.season_id != target.season_id
-            or _utc(context.as_of) != as_of
-        ):
+        if (context.competition_format != CompetitionFormat.LEAGUE_POINTS or context.analysis_type != AnalysisType.PRE_MATCH or context.competition_id != target.competition_id or context.season_id != target.season_id or _utc(context.as_of) != as_of):
             raise FeatureEngineError(FeatureReason.INCOMPATIBLE_MATCH_CONTEXT)
 
-        eligible = _eligible_query(
-            competition_id=target.competition_id,
-            season_id=target.season_id,
-            as_of=as_of,
-        )
+        eligible = _eligible_query(competition_id=target.competition_id, season_id=target.season_id, as_of=as_of)
         ordering = (Match.kickoff_at.desc(), Match.id.desc())
 
         def history(team_id: int, *, venue: str | None = None) -> list[Match]:
@@ -126,10 +99,7 @@ class FeatureEngine:
         away_all = history(target.away_team_id)
         home_home = history(target.home_team_id, venue="home")
         away_away = history(target.away_team_id, venue="away")
-
-        baseline_matches = list(
-            self.session.scalars(select(Match).where(eligible, Match.id != match_id).order_by(*ordering))
-        )
+        baseline_matches = list(self.session.scalars(select(Match).where(eligible, Match.id != match_id).order_by(*ordering)))
         if baseline_matches:
             games = len(baseline_matches)
             home_avg = sum(m.home_score or 0 for m in baseline_matches) / games
@@ -148,7 +118,6 @@ class FeatureEngine:
             away_attack=(away_away10.gf_per_game / away_avg) if away_away10.gf_per_game is not None and away_avg else None,
             away_defence_conceded=(away_away10.ga_per_game / home_avg) if away_away10.ga_per_game is not None and home_avg else None,
         )
-
         reasons: list[FeatureReason] = []
         if len(home_all) < 10 or len(away_all) < 10:
             reasons.append(FeatureReason.INSUFFICIENT_TEAM_HISTORY)
@@ -160,36 +129,19 @@ class FeatureEngine:
             reasons.append(FeatureReason.INSUFFICIENT_COMPETITION_BASELINE)
 
         result = FeatureSet(
-            match_id=match_id,
-            as_of=as_of,
-            calculated_at=datetime.now(timezone.utc),
-            context_classifier_version=context.classifier_version,
-            feature_engine_version=FEATURE_ENGINE_VERSION,
-            home_last5=_form(home_all, target.home_team_id, 5),
-            home_last10=_form(home_all, target.home_team_id, 10),
-            away_last5=_form(away_all, target.away_team_id, 5),
-            away_last10=_form(away_all, target.away_team_id, 10),
-            home_home5=_form(home_home, target.home_team_id, 5),
-            home_home10=home_home10,
-            away_away5=_form(away_away, target.away_team_id, 5),
-            away_away10=away_away10,
-            competition_baseline=baseline,
-            strengths=strengths,
-            reasons=tuple(dict.fromkeys(reasons)),
+            match_id=match_id, as_of=as_of, calculated_at=datetime.now(timezone.utc),
+            context_classifier_version=context.classifier_version, feature_engine_version=FEATURE_ENGINE_VERSION,
+            home_last5=_form(home_all, target.home_team_id, 5), home_last10=_form(home_all, target.home_team_id, 10),
+            away_last5=_form(away_all, target.away_team_id, 5), away_last10=_form(away_all, target.away_team_id, 10),
+            home_home5=_form(home_home, target.home_team_id, 5), home_home10=home_home10,
+            away_away5=_form(away_away, target.away_team_id, 5), away_away10=away_away10,
+            competition_baseline=baseline, strengths=strengths, reasons=tuple(dict.fromkeys(reasons)),
         )
-        logger.info(
-            "feature_engine_calculated",
-            extra={
-                "match_id": match_id,
-                "as_of": as_of.isoformat(),
-                "feature_engine_version": FEATURE_ENGINE_VERSION,
-                "home_history_count": len(home_all),
-                "away_history_count": len(away_all),
-                "home_split_count": len(home_home),
-                "away_split_count": len(away_away),
-                "competition_baseline_count": len(baseline_matches),
-                "reasons": [reason.value for reason in result.reasons],
-                "duration_ms": round((perf_counter() - started_at) * 1000, 3),
-            },
-        )
+        logger.info("feature_engine_calculated", extra={
+            "match_id": match_id, "as_of": as_of.isoformat(), "feature_engine_version": FEATURE_ENGINE_VERSION,
+            "home_history_count": len(home_all), "away_history_count": len(away_all),
+            "home_split_count": len(home_home), "away_split_count": len(away_away),
+            "competition_baseline_count": len(baseline_matches), "reasons": [reason.value for reason in result.reasons],
+            "duration_ms": round((perf_counter() - started_at) * 1000, 3),
+        })
         return result
