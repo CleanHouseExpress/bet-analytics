@@ -1,15 +1,6 @@
 from datetime import date, datetime
 
-from sqlalchemy import (
-    BigInteger,
-    Boolean,
-    Date,
-    DateTime,
-    ForeignKey,
-    Index,
-    String,
-    UniqueConstraint,
-)
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Index, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from apps.api.app.core.database import Base
@@ -31,9 +22,7 @@ class Competition(Base):
 
 class Season(Base):
     __tablename__ = "seasons"
-    __table_args__ = (
-        UniqueConstraint("competition_id", "name", name="uq_seasons_competition_name"),
-    )
+    __table_args__ = (UniqueConstraint("competition_id", "name", name="uq_seasons_competition_name"),)
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     competition_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("competitions.id", ondelete="CASCADE"), nullable=False)
@@ -86,6 +75,6 @@ class Match(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
     competition: Mapped[Competition] = relationship(back_populates="matches")
-    season: Mapped[Season] = relationship(back_populates="season") if False else relationship(back_populates="matches")
+    season: Mapped[Season] = relationship(back_populates="matches")
     home_team: Mapped[Team] = relationship(foreign_keys=[home_team_id], back_populates="home_matches")
     away_team: Mapped[Team] = relationship(foreign_keys=[away_team_id], back_populates="away_matches")
