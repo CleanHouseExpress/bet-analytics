@@ -176,3 +176,20 @@ def test_same_semantic_input_produces_same_probabilistic_output():
     assert first.score_matrix == second.score_matrix
     assert first.matrix_probability_mass == second.matrix_probability_mass
     assert first.tail_probability == second.tail_probability
+
+
+def test_extreme_finite_lambda_does_not_overflow():
+    lambda_ = 1e308
+
+    probability = poisson_probability(lambda_, 10)
+
+    assert math.isfinite(probability)
+    assert 0.0 <= probability <= 1.0
+
+
+def test_extreme_finite_lambda_distribution_does_not_overflow():
+    probabilities = poisson_distribution(1e308, 10)
+
+    assert len(probabilities) == 11
+    assert all(math.isfinite(value) for value in probabilities)
+    assert all(0.0 <= value <= 1.0 for value in probabilities)

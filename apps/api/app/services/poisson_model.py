@@ -32,7 +32,17 @@ def poisson_probability(lambda_: float, k: int) -> float:
     if not _finite_positive(lambda_) or k < 0:
         raise PoissonModelError(PoissonReason.INVALID_LAMBDA)
 
-    return math.exp(-lambda_) * (lambda_ ** k) / math.factorial(k)
+    log_probability = (
+        -lambda_
+        + k * math.log(lambda_)
+        - math.lgamma(k + 1)
+    )
+    probability = math.exp(log_probability)
+
+    if not math.isfinite(probability) or not 0.0 <= probability <= 1.0:
+        raise PoissonModelError(PoissonReason.INVALID_LAMBDA)
+
+    return probability
 
 
 def poisson_distribution(lambda_: float, max_goals: int) -> tuple[float, ...]:
