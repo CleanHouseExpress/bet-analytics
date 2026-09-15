@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+import math
 
 import pytest
 from sqlalchemy import text
@@ -48,6 +49,11 @@ def _seed(session):
     return target, comp, season, target_kickoff, home, away, a, first_history_id
 
 
+def _insert_match(session, *, comp, season, home, away, kickoff, status='finished', hs=1, aws=0):
+    n = datetime(2096, 1, 1, tzinfo=UTC)
+    return session.execute(text("INSERT INTO matches (competition_id,season_id,home_team_id,away_team_id,kickoff_at,status,home_score,away_score,created_at,updated_at) VALUES (:c,:s,:h,:a,:k,:status,:hs,:aws,:n,:n) RETURNING id"), {"c":comp,"s":season,"h":home,"a":away,"k":kickoff,"status":status,"hs":hs,"aws":aws,"n":n}).scalar_one()
+
+
 def test_feature_engine_windows_splits_baseline_and_temporal_exclusion():
     with SessionLocal() as session:
         target, comp, season, kickoff, *_ = _seed(session)
@@ -71,12 +77,104 @@ def test_match_at_or_after_as_of_does_not_enter_history_and_future_data_does_not
         context = _context(target, comp, season, as_of)
         before = engine.calculate(match_id=target, as_of=as_of, context=context)
         before_hash = semantic_hash(before)
-        n = datetime(2096, 1, 1, tzinfo=UTC)
-        session.execute(text("INSERT INTO matches (competition_id,season_id,home_team_id,away_team_id,kickoff_at,status,home_score,away_score,created_at,updated_at) VALUES (:c,:s,:h,:a,:k,'finished',99,0,:n,:n)"), {"c":comp,"s":season,"h":home,"a":a,"k":as_of,"n":n})
-        session.execute(text("INSERT INTO matches (competition_id,season_id,home_team_id,away_team_id,kickoff_at,status,home_score,away_score,created_at,updated_at) VALUES (:c,:s,:h,:a,:k,'finished',99,0,:n,:n)"), {"c":comp,"s":season,"h":home,"a":a,"k":as_of+timedelta(hours=1),"n":n})
+        _insert_match(session, comp=comp, season=season, home=home, away=a, kickoff=as_of, hs=99, aws=0)
+        _insert_match(session, comp=comp, season=season, home=home, away=a, kickoff=as_of+timedelta(hours=1), hs=99, aws=0)
         session.commit()
         after = engine.calculate(match_id=target, as_of=as_of, context=context)
         assert semantic_hash(after) == before_hash
+
+
+def test_non_final_or_scoreless_matches_and_target_are_excluded():
+    with SessionLocal() as session:
+        target, comp, season, kickoff, home, _, a, _ = _seed(session)
+        as_of = kickoff - timedelta(days=1)
+        engine = FeatureEngine(session)
+        context = _context(target, comp, season, as_of)
+        before = engine.calculate(match_id=target, as_of=as_of, context=context)
+        _insert_match(session, comp=comp, season=season, home=home, away=a, kickoff=as_of-timedelta(hours=3), status='scheduled', hs=99, aws=0)
+        _insert_match(session, comp=comp, season=season, home=home, away=a, kickoff=as_of-timedelta(hours=2), status='finished', hs=None, aws=None)
+        session.execute(text("UPDATE matches SET status='finished', home_score=99, away_score=0, kickoff_at=:k WHERE id=:id"), {"k":as_of-timedelta(hours=1), "id":target})
+        session.commit()
+        after = engine.calculate(match_id=target, as_of=as_of, context=context)
+        assert semantic_hash(after) == semantic_hash(before)
+
+
+def test_baseline_isolated_by_competition_and_season():
+    with SessionLocal() as session:
+        target, comp, season, kickoff, home, _, a, _ = _seed(session)
+        as_of = kickoff - timedelta(days=1)
+        context = _context(target, comp, season, as_of)
+        before = FeatureEngine(session).calculate(match_id=target, as_of=as_of, context=context)
+        n = datetime(2096, 1, 1, tzinfo=UTC)
+        other_comp = session.execute(text("INSERT INTO competitions (name,country_code,competition_type,created_at,updated_at) VALUES ('BETS-3 Other League','BRA','league',:n,:n) RETURNING id"), {"n":n}).scalar_one()
+        other_season = session.execute(text("INSERT INTO seasons (competition_id,name,is_current,created_at,updated_at) VALUES (:c,'2096',false,:n,:n) RETURNING id"), {"c":other_comp,"n":n}).scalar_one()
+        _insert_match(session, comp=other_comp, season=other_season, home=home, away=a, kickoff=as_of-timedelta(hours=1), hs=99, aws=99)
+        old_season = session.execute(text("INSERT INTO seasons (competition_id,name,is_current,created_at,updated_at) VALUES (:c,'2095',false,:n,:n) RETURNING id"), {"c":comp,"n":n}).scalar_one()
+        _insert_match(session, comp=comp, season=old_season, home=home, away=a, kickoff=as_of-timedelta(hours=2), hs=99, aws=99)
+        session.commit()
+        after = FeatureEngine(session).calculate(match_id=target, as_of=as_of, context=context)
+        assert after.competition_baseline == before.competition_baseline
+        assert after.home_last10 == before.home_last10
+
+
+def test_strength_formulas_are_exact():
+    with SessionLocal() as session:
+        target, comp, season, kickoff, *_ = _seed(session)
+        as_of = kickoff - timedelta(days=1)
+        result = FeatureEngine(session).calculate(match_id=target, as_of=as_of, context=_context(target, comp, season, as_of))
+        b = result.competition_baseline
+        assert result.strengths.home_attack == pytest.approx(result.home_home10.gf_per_game / b.home_goals_per_game)
+        assert result.strengths.home_defence_conceded == pytest.approx(result.home_home10.ga_per_game / b.away_goals_per_game)
+        assert result.strengths.away_attack == pytest.approx(result.away_away10.gf_per_game / b.away_goals_per_game)
+        assert result.strengths.away_defence_conceded == pytest.approx(result.away_away10.ga_per_game / b.home_goals_per_game)
+        assert all(math.isfinite(v) for v in (result.strengths.home_attack, result.strengths.home_defence_conceded, result.strengths.away_attack, result.strengths.away_defence_conceded))
+
+
+def test_zero_baseline_never_produces_nan_or_infinity():
+    with SessionLocal() as session:
+        target, comp, season, kickoff, *_ = _seed(session)
+        as_of = kickoff - timedelta(days=1)
+        session.execute(text("UPDATE matches SET home_score=0, away_score=0 WHERE competition_id=:c AND season_id=:s AND kickoff_at < :a"), {"c":comp,"s":season,"a":as_of})
+        session.commit()
+        result = FeatureEngine(session).calculate(match_id=target, as_of=as_of, context=_context(target, comp, season, as_of))
+        assert result.strengths.home_attack is None
+        assert result.strengths.home_defence_conceded is None
+        assert result.strengths.away_attack is None
+        assert result.strengths.away_defence_conceded is None
+        assert 'INSUFFICIENT_COMPETITION_BASELINE' in {r.value for r in result.reasons}
+
+
+def test_insufficient_history_exposes_counts_and_reasons():
+    with SessionLocal() as session:
+        target, comp, season, kickoff, *_ = _seed(session)
+        as_of = datetime(2096, 6, 4, tzinfo=UTC)
+        result = FeatureEngine(session).calculate(match_id=target, as_of=as_of, context=_context(target, comp, season, as_of))
+        assert result.home_last10.games < 10
+        assert result.away_last10.games < 10
+        assert not result.home_last10.complete and not result.away_last10.complete
+        reasons = {r.value for r in result.reasons}
+        assert 'INSUFFICIENT_TEAM_HISTORY' in reasons
+        assert 'INSUFFICIENT_HOME_HISTORY' in reasons
+        assert 'INSUFFICIENT_AWAY_HISTORY' in reasons
+
+
+def test_incompatible_match_context_is_blocked():
+    with SessionLocal() as session:
+        target, comp, season, kickoff, *_ = _seed(session)
+        as_of = kickoff - timedelta(days=1)
+        context = _context(target, comp, season, as_of)
+        incompatible = MatchContext(
+            match_id=context.match_id,
+            competition_id=context.competition_id,
+            season_id=context.season_id,
+            competition_format=CompetitionFormat.KNOCKOUT_FIRST_LEG,
+            analysis_type=context.analysis_type,
+            classified_at=context.classified_at,
+            as_of=context.as_of,
+        )
+        with pytest.raises(FeatureEngineError) as exc:
+            FeatureEngine(session).calculate(match_id=target, as_of=as_of, context=incompatible)
+        assert exc.value.reason.value == 'INCOMPATIBLE_MATCH_CONTEXT'
 
 
 def test_persisted_snapshot_is_idempotent_and_retroactive_change_cannot_replace_evidence():
@@ -97,7 +195,7 @@ def test_persisted_snapshot_is_idempotent_and_retroactive_change_cannot_replace_
         assert semantic_hash(changed) != semantic_hash(original)
         with pytest.raises(FeatureSnapshotConflict):
             persist_feature_snapshot(session, evaluation_key='BETS-3-test-immutable', features=changed)
-        stored_hash = session.execute(text("SELECT semantic_hash FROM feature_snapshots WHERE evaluation_key='BETS-3-test-immutable'" )).scalar_one()
+        stored_hash = session.execute(text("SELECT semantic_hash FROM feature_snapshots WHERE evaluation_key='BETS-3-test-immutable'")).scalar_one()
         assert stored_hash == semantic_hash(original)
 
 
