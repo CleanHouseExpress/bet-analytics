@@ -19,12 +19,12 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     op.add_column("matches", sa.Column("finished_at", sa.DateTime(timezone=True), nullable=True))
 
-    # Conservative backfill: use persisted provider/sync evidence. Never infer a
-    # completion time from kickoff + an assumed match duration.
+    # Conservative backfill: prefer the local sync timestamp, which proves when
+    # this system observed the final result. Never infer completion from kickoff.
     op.execute(
         """
         UPDATE matches
-        SET finished_at = COALESCE(provider_updated_at, last_synced_at, updated_at)
+        SET finished_at = COALESCE(last_synced_at, updated_at, provider_updated_at)
         WHERE status = 'finished'
           AND home_score IS NOT NULL
           AND away_score IS NOT NULL
@@ -32,9 +32,8 @@ def upgrade() -> None:
         """
     )
 
-    # Keep the temporal evidence invariant at the database boundary, including
-    # ingestion paths that use raw SQL. The first observation of a final score is
-    # immutable; later syncs must not move it forward or backward.
+    # Enforce the invariant at the DB boundary because ingestion uses raw SQL.
+    # First observation of a final score is immutable across later syncs.
     op.execute(
         """
         CREATE FUNCTION set_match_finished_at() RETURNS trigger AS $$
@@ -43,7 +42,7 @@ def upgrade() -> None:
                AND NEW.home_score IS NOT NULL
                AND NEW.away_score IS NOT NULL
                AND NEW.finished_at IS NULL THEN
-                NEW.finished_at := COALESCE(NEW.provider_updated_at, NEW.last_synced_at, CURRENT_TIMESTAMP);
+                NEW.finished_at := COALESCE(NEW.last_synced_at, CURRENT_TIMESTAMP);
             END IF;
             IF TG_OP = 'UPDATE' AND OLD.finished_at IS NOT NULL THEN
                 NEW.finished_at := OLD.finished_at;
