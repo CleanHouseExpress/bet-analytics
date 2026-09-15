@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import math
 from datetime import datetime, timezone
 
@@ -12,7 +13,12 @@ from apps.api.app.domain.features import (
     FormWindow,
     StrengthFeatures,
 )
-from apps.api.app.domain.poisson import PoissonReason
+from apps.api.app.domain.poisson import (
+    DEFAULT_MAX_GOALS,
+    POISSON_MODEL_NAME,
+    POISSON_MODEL_VERSION,
+    PoissonReason,
+)
 from apps.api.app.services.poisson_model import (
     PoissonModel,
     PoissonModelError,
@@ -193,3 +199,46 @@ def test_extreme_finite_lambda_distribution_does_not_overflow():
     assert len(probabilities) == 11
     assert all(math.isfinite(value) for value in probabilities)
     assert all(0.0 <= value <= 1.0 for value in probabilities)
+
+
+@pytest.mark.parametrize(
+    "invalid_lambda",
+    [0.0, -1.0, math.inf, -math.inf, math.nan],
+)
+def test_invalid_lambda_is_blocked_explicitly(invalid_lambda):
+    with pytest.raises(PoissonModelError) as exc_info:
+        poisson_probability(invalid_lambda, 0)
+
+    assert exc_info.value.reason == PoissonReason.INVALID_LAMBDA
+
+
+def test_blocked_calculation_logs_structured_reason(caplog):
+    features = make_features(
+        baseline_home=0.0,
+        baseline_away=1.2,
+    )
+
+    with caplog.at_level(logging.WARNING):
+        with pytest.raises(PoissonModelError) as exc_info:
+            PoissonModel().calculate(features=features)
+
+    assert exc_info.value.reason == PoissonReason.INVALID_BASELINE
+
+    records = [
+        record
+        for record in caplog.records
+        if record.getMessage() == "poisson_model_blocked"
+    ]
+
+    assert len(records) == 1
+
+    record = records[0]
+
+    assert record.reason == PoissonReason.INVALID_BASELINE.value
+    assert record.match_id == features.match_id
+    assert record.as_of == features.as_of.isoformat()
+    assert record.model_name == POISSON_MODEL_NAME
+    assert record.model_version == POISSON_MODEL_VERSION
+    assert record.feature_engine_version == features.feature_engine_version
+    assert record.max_goals == DEFAULT_MAX_GOALS
+    assert record.duration_ms >= 0

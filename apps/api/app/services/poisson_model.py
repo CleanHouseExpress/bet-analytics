@@ -64,6 +64,42 @@ class PoissonModel:
     ) -> PoissonResult:
         started_at = perf_counter()
 
+        try:
+            return self._calculate(
+                features=features,
+                max_goals=max_goals,
+                started_at=started_at,
+            )
+        except PoissonModelError as exc:
+            logger.warning(
+                "poisson_model_blocked",
+                extra={
+                    "match_id": getattr(features, "match_id", None),
+                    "as_of": (
+                        features.as_of.isoformat()
+                        if getattr(features, "as_of", None) is not None
+                        else None
+                    ),
+                    "model_name": POISSON_MODEL_NAME,
+                    "model_version": POISSON_MODEL_VERSION,
+                    "feature_engine_version": getattr(
+                        features, "feature_engine_version", None
+                    ),
+                    "max_goals": max_goals,
+                    "duration_ms": (perf_counter() - started_at) * 1000,
+                    "reason": exc.reason.value,
+                },
+            )
+            raise
+
+    def _calculate(
+        self,
+        *,
+        features: FeatureSet,
+        max_goals: int,
+        started_at: float,
+    ) -> PoissonResult:
+
         if features.feature_engine_version != FEATURE_ENGINE_VERSION:
             raise PoissonModelError(PoissonReason.INCOMPATIBLE_FEATURE_VERSION)
 
