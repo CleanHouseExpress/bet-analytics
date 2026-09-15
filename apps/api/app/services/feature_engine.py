@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
+from time import perf_counter
 
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
@@ -16,8 +18,11 @@ from apps.api.app.domain.features import (
 from apps.api.app.domain.history import Match
 from apps.api.app.domain.match_context import AnalysisType, CompetitionFormat, MatchContext
 
+logger = logging.getLogger(__name__)
 
-FINAL_STATUSES = frozenset({"finished", "final", "completed", "full_time", "ft"})
+# football-data.org is the canonical V1 fixture provider and its FINISHED status is
+# normalized to lowercase by the adapter. Do not accept guessed terminal aliases.
+FINAL_STATUSES = frozenset({"finished"})
 
 
 class FeatureEngineError(ValueError):
@@ -82,6 +87,7 @@ class FeatureEngine:
         self.session = session
 
     def calculate(self, *, match_id: int, as_of: datetime, context: MatchContext) -> FeatureSet:
+        started_at = perf_counter()
         as_of = _utc(as_of)
         target = self.session.get(Match, match_id)
         if target is None or context.match_id != match_id:
@@ -153,7 +159,7 @@ class FeatureEngine:
         if not baseline_matches or not home_avg or not away_avg:
             reasons.append(FeatureReason.INSUFFICIENT_COMPETITION_BASELINE)
 
-        return FeatureSet(
+        result = FeatureSet(
             match_id=match_id,
             as_of=as_of,
             calculated_at=datetime.now(timezone.utc),
@@ -171,3 +177,19 @@ class FeatureEngine:
             strengths=strengths,
             reasons=tuple(dict.fromkeys(reasons)),
         )
+        logger.info(
+            "feature_engine_calculated",
+            extra={
+                "match_id": match_id,
+                "as_of": as_of.isoformat(),
+                "feature_engine_version": FEATURE_ENGINE_VERSION,
+                "home_history_count": len(home_all),
+                "away_history_count": len(away_all),
+                "home_split_count": len(home_home),
+                "away_split_count": len(away_away),
+                "competition_baseline_count": len(baseline_matches),
+                "reasons": [reason.value for reason in result.reasons],
+                "duration_ms": round((perf_counter() - started_at) * 1000, 3),
+            },
+        )
+        return result
