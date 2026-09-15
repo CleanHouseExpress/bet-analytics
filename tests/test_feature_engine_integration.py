@@ -84,7 +84,7 @@ def test_match_at_or_after_as_of_does_not_enter_history_and_future_data_does_not
         assert semantic_hash(after) == before_hash
 
 
-def test_non_final_or_scoreless_matches_and_target_are_excluded():
+def test_non_final_or_scoreless_matches_are_excluded():
     with SessionLocal() as session:
         target, comp, season, kickoff, home, _, a, _ = _seed(session)
         as_of = kickoff - timedelta(days=1)
@@ -93,9 +93,24 @@ def test_non_final_or_scoreless_matches_and_target_are_excluded():
         before = engine.calculate(match_id=target, as_of=as_of, context=context)
         _insert_match(session, comp=comp, season=season, home=home, away=a, kickoff=as_of-timedelta(hours=3), status='scheduled', hs=99, aws=0)
         _insert_match(session, comp=comp, season=season, home=home, away=a, kickoff=as_of-timedelta(hours=2), status='finished', hs=None, aws=None)
-        session.execute(text("UPDATE matches SET status='finished', home_score=99, away_score=0, kickoff_at=:k WHERE id=:id"), {"k":as_of-timedelta(hours=1), "id":target})
         session.commit()
         after = engine.calculate(match_id=target, as_of=as_of, context=context)
+        assert semantic_hash(after) == semantic_hash(before)
+
+
+def test_target_match_is_explicitly_excluded_from_history_query():
+    with SessionLocal() as session:
+        target, comp, season, kickoff, home, _, a, _ = _seed(session)
+        as_of = kickoff - timedelta(days=1)
+        context = _context(target, comp, season, as_of)
+        engine = FeatureEngine(session)
+        before = engine.calculate(match_id=target, as_of=as_of, context=context)
+        # Keep target kickoff valid (> as_of) while making its own row look like an otherwise
+        # eligible final result. It must still not affect the historical feature sample.
+        session.execute(text("UPDATE matches SET status='finished', home_score=99, away_score=0 WHERE id=:id"), {"id":target})
+        session.commit()
+        after = engine.calculate(match_id=target, as_of=as_of, context=context)
+        assert after.match_id == target
         assert semantic_hash(after) == semantic_hash(before)
 
 
