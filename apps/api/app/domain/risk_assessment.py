@@ -75,3 +75,4 @@ class RiskAssessment:
     exposure_warning: str | None
     risk_decision: RiskDecision
     reason: RiskReason
+    semantic_hash: str
