@@ -1,6 +1,6 @@
 """persist immutable market probability snapshots
 
-Revision ID: 0010_market_probability_snapshots
+Revision ID: 0010_market_prob_snapshots
 Revises: 0009_poisson_model_snapshots
 """
 
@@ -8,7 +8,7 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
-revision = "0010_market_probability_snapshots"
+revision = "0010_market_prob_snapshots"
 down_revision = "0009_poisson_model_snapshots"
 branch_labels = None
 depends_on = None
@@ -29,10 +29,22 @@ def upgrade() -> None:
         sa.Column("payload", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
         sa.Column("semantic_hash", sa.String(length=64), nullable=False),
         sa.Column("calculated_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-        sa.ForeignKeyConstraint(["match_id"], ["matches.id"], ondelete="RESTRICT"),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.ForeignKeyConstraint(
+            ["match_id"],
+            ["matches.id"],
+            ondelete="RESTRICT",
+        ),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("evaluation_key", name="uq_market_probability_snapshots_evaluation_key"),
+        sa.UniqueConstraint(
+            "evaluation_key",
+            name="uq_market_probability_snapshots_evaluation_key",
+        ),
     )
     op.create_index(
         "ix_market_probability_snapshots_match_as_of",
@@ -49,6 +61,12 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index("ix_market_probability_snapshots_market_version", table_name="market_probability_snapshots")
-    op.drop_index("ix_market_probability_snapshots_match_as_of", table_name="market_probability_snapshots")
+    op.drop_index(
+        "ix_market_probability_snapshots_market_version",
+        table_name="market_probability_snapshots",
+    )
+    op.drop_index(
+        "ix_market_probability_snapshots_match_as_of",
+        table_name="market_probability_snapshots",
+    )
     op.drop_table("market_probability_snapshots")
