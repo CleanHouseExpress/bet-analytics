@@ -31,6 +31,7 @@ testpaths = ["tests"]
 [tool.ruff]
 target-version = "py313"
 line-length = 100
+extend-exclude = ["build"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
@@ -51,3 +52,22 @@ known-first-party = ["apps"]
 "tests/test_analises_bet_spreadsheet_import.py" = ["E501"]
 "tests/test_brasileirao_backtest_import.py" = ["E501", "I001"]
 "tests/test_brazilian_leagues_sync.py" = ["E501"]
+
+# Pre-existing source/test debt is kept explicit and scoped by file/rule.
+# BETS-5 files are intentionally not ignored and must pass the active Ruff gate.
+"apps/api/app/domain/features.py" = ["I001"]
+"apps/api/app/domain/history.py" = ["E501", "I001"]
+"apps/api/app/domain/match_context.py" = ["I001"]
+"apps/api/app/services/match_context.py" = ["E501"]
+"tests/test_feature_engine_finished_at.py" = ["E501"]
+"tests/test_feature_engine_integration.py" = ["E501", "I001"]
+"apps/api/app/domain/poisson.py" = ["E501", "I001", "UP017", "B008"]
+"apps/api/app/services/poisson_model.py" = ["E501", "I001", "UP017", "B008"]
+"apps/api/app/services/poisson_snapshot.py" = ["E501", "I001", "UP017", "B008"]
+"apps/api/app/services/feature_engine.py" = ["E501", "I001", "UP017", "B008"]
+"apps/api/app/services/feature_snapshot.py" = ["E501", "I001", "UP017", "B008"]
+"tests/test_feature_engine.py" = ["E501", "I001", "UP017", "B008"]
+"tests/test_feature_snapshot.py" = ["E501", "I001", "UP017", "B008"]
+"tests/test_poisson_model.py" = ["E501", "I001", "UP017", "B008"]
+"tests/test_poisson_snapshot.py" = ["E501", "I001", "UP017", "B008"]
+"tests/test_poisson_integration.py" = ["E501", "I001", "UP017", "B008"]
