@@ -9,7 +9,11 @@ import pytest
 from apps.api.app.core.database import SessionLocal
 from apps.api.app.domain.history import Competition, Match, Season, Team
 from apps.api.app.domain.market_probability import Market
-from apps.api.app.domain.poisson import POISSON_MODEL_NAME, POISSON_MODEL_VERSION, PoissonResult
+from apps.api.app.domain.poisson import (
+    POISSON_MODEL_NAME,
+    POISSON_MODEL_VERSION,
+    PoissonResult,
+)
 from apps.api.app.services.market_probability import MarketProbabilityEngine
 from apps.api.app.services.market_probability_snapshot import (
     MarketProbabilitySnapshotConflict,
@@ -17,7 +21,6 @@ from apps.api.app.services.market_probability_snapshot import (
     persist_market_probability_snapshot,
     semantic_hash,
 )
-
 
 MATCH_ID = 9_910_001
 COMPETITION_ID = 9_910_001
