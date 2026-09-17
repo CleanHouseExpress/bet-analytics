@@ -108,6 +108,53 @@ def test_invalid_mass_is_blocked():
     assert exc.value.reason == MarketProbabilityReason.INVALID_PROBABILITY_MASS
 
 
+def test_tampered_matrix_mass_is_blocked():
+    source = poisson_result()
+    matrix = list(source.score_matrix)
+    first_row = list(matrix[0])
+    first_row[0] += 0.01
+    matrix[0] = tuple(first_row)
+    tampered = replace(source, score_matrix=tuple(matrix))
+    with pytest.raises(MarketProbabilityError) as exc:
+        MarketProbabilityEngine().calculate(poisson=tampered, market=Market.BTTS_YES)
+    assert exc.value.reason == MarketProbabilityReason.INVALID_PROBABILITY_MASS
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        replace(poisson_result(), feature_engine_version=""),
+        replace(poisson_result(), feature_engine_version="   "),
+        replace(poisson_result(), max_goals=-1),
+        replace(poisson_result(), home_goal_probabilities=(1.0,)),
+        replace(poisson_result(), away_goal_probabilities=(1.0,)),
+        replace(poisson_result(), score_matrix=((1.0,),)),
+        replace(
+            poisson_result(),
+            home_goal_probabilities=(math.nan,) + poisson_result().home_goal_probabilities[1:],
+        ),
+        replace(
+            poisson_result(),
+            away_goal_probabilities=(-0.1,) + poisson_result().away_goal_probabilities[1:],
+        ),
+        replace(
+            poisson_result(),
+            score_matrix=((math.inf,) + poisson_result().score_matrix[0][1:],)
+            + poisson_result().score_matrix[1:],
+        ),
+        replace(
+            poisson_result(),
+            score_matrix=((-0.1,) + poisson_result().score_matrix[0][1:],)
+            + poisson_result().score_matrix[1:],
+        ),
+    ],
+)
+def test_malformed_poisson_distribution_is_blocked(source):
+    with pytest.raises(MarketProbabilityError) as exc:
+        MarketProbabilityEngine().calculate(poisson=source, market=Market.BTTS_YES)
+    assert exc.value.reason == MarketProbabilityReason.INVALID_POISSON_RESULT
+
+
 @pytest.mark.parametrize("value", [0.0, -1.0, math.inf, -math.inf, math.nan])
 def test_invalid_lambda_is_blocked(value):
     source = replace(poisson_result(), lambda_home=value)
