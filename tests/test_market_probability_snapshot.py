@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import math
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from apps.api.app.core.database import SessionLocal
+from apps.api.app.domain.history import Competition, Match, Season, Team
 from apps.api.app.domain.market_probability import Market
 from apps.api.app.domain.poisson import POISSON_MODEL_NAME, POISSON_MODEL_VERSION, PoissonResult
 from apps.api.app.services.market_probability import MarketProbabilityEngine
@@ -18,6 +19,14 @@ from apps.api.app.services.market_probability_snapshot import (
 )
 
 
+MATCH_ID = 9_910_001
+COMPETITION_ID = 9_910_001
+SEASON_ID = 9_910_001
+HOME_TEAM_ID = 9_910_001
+AWAY_TEAM_ID = 9_910_002
+AS_OF = datetime(2026, 9, 15, 16, tzinfo=UTC)
+
+
 def poisson_result() -> PoissonResult:
     lh = 1.3658536585365852
     la = 0.6593406593406593
@@ -26,8 +35,8 @@ def poisson_result() -> PoissonResult:
     matrix = tuple(tuple(h * a for a in ap) for h in hp)
     mass = math.fsum(math.fsum(row) for row in matrix)
     return PoissonResult(
-        match_id=1532,
-        as_of=datetime(2026, 9, 15, 16, tzinfo=UTC),
+        match_id=MATCH_ID,
+        as_of=AS_OF,
         calculated_at=datetime(2026, 9, 15, 16, 1, tzinfo=UTC),
         model_name=POISSON_MODEL_NAME,
         model_version=POISSON_MODEL_VERSION,
@@ -49,6 +58,62 @@ def result():
     )
 
 
+def _seed_match(session) -> None:
+    now = datetime(2026, 9, 1, tzinfo=UTC)
+    session.add(
+        Competition(
+            id=COMPETITION_ID,
+            name="BETS snapshot competition",
+            country_code="BRA",
+            competition_type="league",
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    session.add_all(
+        [
+            Team(
+                id=HOME_TEAM_ID,
+                name="BETS snapshot home",
+                country_code="BRA",
+                created_at=now,
+                updated_at=now,
+            ),
+            Team(
+                id=AWAY_TEAM_ID,
+                name="BETS snapshot away",
+                country_code="BRA",
+                created_at=now,
+                updated_at=now,
+            ),
+        ]
+    )
+    session.add(
+        Season(
+            id=SEASON_ID,
+            competition_id=COMPETITION_ID,
+            name="2026 BETS snapshot",
+            is_current=True,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    session.add(
+        Match(
+            id=MATCH_ID,
+            competition_id=COMPETITION_ID,
+            season_id=SEASON_ID,
+            home_team_id=HOME_TEAM_ID,
+            away_team_id=AWAY_TEAM_ID,
+            kickoff_at=AS_OF + timedelta(days=1),
+            status="scheduled",
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    session.flush()
+
+
 def test_evaluation_key_is_deterministic():
     first = result()
     second = replace(first, calculated_at=datetime(2030, 1, 1, tzinfo=UTC))
@@ -65,6 +130,7 @@ def test_semantic_change_changes_hash():
 def test_persistence_is_idempotent_and_conflict_is_explicit():
     session = SessionLocal()
     try:
+        _seed_match(session)
         first = result()
         row1 = persist_market_probability_snapshot(session, result=first)
         row2 = persist_market_probability_snapshot(
