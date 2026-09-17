@@ -18,6 +18,7 @@ from apps.api.app.services.feature_engine import FeatureEngine
 from apps.api.app.services.market_probability import MarketProbabilityEngine
 from apps.api.app.services.poisson_model import PoissonModel
 from apps.api.app.services.poisson_snapshot import semantic_hash
+from apps.api.app.services.value_engine import ValueEngine
 
 
 MATCH_ID = 9_900_001
@@ -245,6 +246,49 @@ def test_bets3_bets4_feed_all_bets5_markets(session):
     assert by_market[Market.BTTS_YES].p_model + by_market[Market.BTTS_NO].p_model == pytest.approx(
         1.0, abs=1e-12
     )
+
+
+def test_bets5_six_markets_feed_bets6_value_engine(session):
+    poisson = PoissonModel().calculate(features=_features(session))
+    probabilities = MarketProbabilityEngine().calculate_all(poisson=poisson)
+    odds = {
+        Market.TOTAL_GOALS_OVER_1_5: 1.80,
+        Market.TOTAL_GOALS_OVER_2_5: 2.50,
+        Market.TOTAL_GOALS_UNDER_3_5: 1.60,
+        Market.TOTAL_GOALS_UNDER_4_5: 1.35,
+        Market.BTTS_YES: 2.10,
+        Market.BTTS_NO: 1.70,
+    }
+
+    assessments = [
+        ValueEngine().calculate(
+            probability=probability,
+            market_odd=odds[probability.market],
+            uncertainty_margin_pp=3.0,
+            odd_source="integration-fixture",
+            odd_observed_at=AS_OF,
+        )
+        for probability in probabilities
+    ]
+
+    assert len(assessments) == 6
+    assert {item.market for item in assessments} == set(Market)
+    for source, assessment in zip(probabilities, assessments, strict=True):
+        assert assessment.match_id == source.match_id
+        assert assessment.as_of == source.as_of
+        assert assessment.market == source.market
+        assert assessment.market_engine_version == source.market_engine_version
+        assert assessment.model_version == source.model_version
+        assert assessment.feature_engine_version == source.feature_engine_version
+        assert assessment.p_model == source.p_model
+        assert assessment.p_cons == pytest.approx(source.p_model - 0.03)
+        assert assessment.p_break_even == pytest.approx(1.0 / assessment.market_odd)
+        assert assessment.edge_pp == pytest.approx(
+            (assessment.p_cons - assessment.p_break_even) * 100.0
+        )
+        assert assessment.ev_cons == pytest.approx(
+            assessment.p_cons * assessment.market_odd - 1.0
+        )
 
 
 def test_reused_feature_set_is_independent_of_database_changes(session):
