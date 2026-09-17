@@ -51,3 +51,17 @@ known-first-party = ["apps"]
 "tests/test_analises_bet_spreadsheet_import.py" = ["E501"]
 "tests/test_brasileirao_backtest_import.py" = ["E501", "I001"]
 "tests/test_brazilian_leagues_sync.py" = ["E501"]
+
+# Legacy files predate the repository-wide Ruff gate. Keep that debt explicit and
+# isolated so new BETS-5 code is linted without turning this story into a broad
+# formatting/refactoring change. Remove entries incrementally as legacy code is cleaned.
+"apps/api/app/domain/poisson.py" = ["E501", "I001", "UP017", "B008"]
+"apps/api/app/services/poisson_model.py" = ["E501", "I001", "UP017", "B008"]
+"apps/api/app/services/poisson_snapshot.py" = ["E501", "I001", "UP017", "B008"]
+"apps/api/app/services/feature_engine.py" = ["E501", "I001", "UP017", "B008"]
+"apps/api/app/services/feature_snapshot.py" = ["E501", "I001", "UP017", "B008"]
+"tests/test_feature_engine.py" = ["E501", "I001", "UP017", "B008"]
+"tests/test_feature_snapshot.py" = ["E501", "I001", "UP017", "B008"]
+"tests/test_poisson_model.py" = ["E501", "I001", "UP017", "B008"]
+"tests/test_poisson_snapshot.py" = ["E501", "I001", "UP017", "B008"]
+"tests/test_poisson_integration.py" = ["E501", "I001", "UP017", "B008"]
