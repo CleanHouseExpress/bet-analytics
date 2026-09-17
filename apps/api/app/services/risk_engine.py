@@ -27,8 +27,9 @@ class RiskEngine:
   b=float(b); up=float(up); uv=b*up; base=BASE_STAKE[v.decision]; placed=[]
   for p in positions:
    if not isinstance(p,OpenPosition): raise RiskEngineError(RiskReason.INVALID_POSITION)
+   if not p.position_id.strip() or not isinstance(p.market,Market) or not _finite(p.stake_units) or p.stake_units<0: raise RiskEngineError(RiskReason.INVALID_POSITION)
    if p.status is not PositionStatus.PLACED: continue
-   if p.match_id!=v.match_id or (wallet is not None and p.wallet_id!=wallet) or not p.position_id.strip() or not _finite(p.stake_units) or p.stake_units<0: raise RiskEngineError(RiskReason.INVALID_POSITION)
+   if p.match_id!=v.match_id or (wallet is not None and p.wallet_id!=wallet): raise RiskEngineError(RiskReason.INVALID_POSITION)
    placed.append(p)
   current=math.fsum(p.stake_units for p in placed); remaining=max(0.,MAX_MATCH_EXPOSURE_UNITS-current); warning=None if known else EXPOSURE_WARNING
   if base==0:return self._result(v,b,up,uv,base,current,remaining,1.,0.,known,warning,RiskDecision.NO_POSITION,RiskReason.VALUE_NOT_GO,placed)
