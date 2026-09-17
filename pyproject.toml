@@ -31,6 +31,7 @@ testpaths = ["tests"]
 [tool.ruff]
 target-version = "py313"
 line-length = 100
+extend-exclude = ["build"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
@@ -52,9 +53,8 @@ known-first-party = ["apps"]
 "tests/test_brasileirao_backtest_import.py" = ["E501", "I001"]
 "tests/test_brazilian_leagues_sync.py" = ["E501"]
 
-# Legacy files predate the repository-wide Ruff gate. Keep that debt explicit and
-# isolated so new BETS-5 code is linted without turning this story into a broad
-# formatting/refactoring change. Remove entries incrementally as legacy code is cleaned.
+# Existing source files are kept explicit while their lint cleanup is handled
+# independently from BETS-5. New BETS-5 files must pass the active Ruff rules.
 "apps/api/app/domain/poisson.py" = ["E501", "I001", "UP017", "B008"]
 "apps/api/app/services/poisson_model.py" = ["E501", "I001", "UP017", "B008"]
 "apps/api/app/services/poisson_snapshot.py" = ["E501", "I001", "UP017", "B008"]
