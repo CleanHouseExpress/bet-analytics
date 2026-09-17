@@ -53,8 +53,14 @@ known-first-party = ["apps"]
 "tests/test_brasileirao_backtest_import.py" = ["E501", "I001"]
 "tests/test_brazilian_leagues_sync.py" = ["E501"]
 
-# Existing source files are kept explicit while their lint cleanup is handled
-# independently from BETS-5. New BETS-5 files must pass the active Ruff rules.
+# Pre-existing source/test debt is kept explicit and scoped by file/rule.
+# BETS-5 files are intentionally not ignored and must pass the active Ruff gate.
+"apps/api/app/domain/features.py" = ["I001"]
+"apps/api/app/domain/history.py" = ["E501", "I001"]
+"apps/api/app/domain/match_context.py" = ["I001"]
+"apps/api/app/services/match_context.py" = ["E501"]
+"tests/test_feature_engine_finished_at.py" = ["E501"]
+"tests/test_feature_engine_integration.py" = ["E501", "I001"]
 "apps/api/app/domain/poisson.py" = ["E501", "I001", "UP017", "B008"]
 "apps/api/app/services/poisson_model.py" = ["E501", "I001", "UP017", "B008"]
 "apps/api/app/services/poisson_snapshot.py" = ["E501", "I001", "UP017", "B008"]
