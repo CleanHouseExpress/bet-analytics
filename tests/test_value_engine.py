@@ -24,7 +24,7 @@ def probability(p_model: float) -> MarketProbabilityResult:
         model_version="poisson-v1",
         feature_engine_version="feature-engine-v1",
         p_model=p_model,
-        fair_odds=1.0 / p_model,
+        fair_odds=None if p_model == 0.0 else 1.0 / p_model,
     )
 
 
@@ -46,6 +46,18 @@ def test_decision_bands(p_model: float, odd: float, margin: float, decision: Val
         uncertainty_margin_pp=margin,
     )
     assert result.decision is decision
+
+
+def test_zero_probability_is_valid_and_results_in_no_go() -> None:
+    result = ValueEngine().calculate(
+        probability=probability(0.0), market_odd=2.00, uncertainty_margin_pp=2.0
+    )
+    assert result.p_model == 0.0
+    assert result.p_cons == 0.0
+    assert result.fair_odds is None
+    assert result.conservative_fair_odds is None
+    assert result.decision is ValueDecision.NO_GO
+    assert result.reason is ValueReason.PROBABILITY_BELOW_THRESHOLD
 
 
 def test_calculates_conservative_metrics_without_rounding() -> None:
