@@ -73,6 +73,15 @@ def test_calculates_conservative_metrics_without_rounding() -> None:
     assert result.odd_min == pytest.approx(1 / (0.79 - 0.04))
 
 
+def test_non_protected_odd_min_respects_low_odd_floor() -> None:
+    result = ValueEngine().calculate(
+        probability=probability(0.89), market_odd=1.195, uncertainty_margin_pp=2.0
+    )
+    assert result.decision is ValueDecision.NO_GO
+    assert result.reason is ValueReason.LOW_ODD_REQUIRES_EXCEPTIONAL_EVIDENCE
+    assert result.odd_min == pytest.approx(1.20)
+
+
 def test_high_probability_without_value_is_no_go() -> None:
     result = ValueEngine().calculate(
         probability=probability(0.94), market_odd=1.05, uncertainty_margin_pp=5.0
