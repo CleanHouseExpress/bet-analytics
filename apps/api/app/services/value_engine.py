@@ -117,10 +117,14 @@ class ValueEngine:
         ):
             raise ValueEngineError(ValueReason.INVALID_MARKET_PROBABILITY)
 
-        if not _finite_number(probability.p_model) or not 0.0 < probability.p_model <= 1.0:
+        if not _finite_number(probability.p_model) or not 0.0 <= probability.p_model <= 1.0:
             raise ValueEngineError(ValueReason.INVALID_MARKET_PROBABILITY)
-        expected_fair_odds = 1.0 / probability.p_model
-        if (
+        p_model = float(probability.p_model)
+        expected_fair_odds = None if p_model == 0.0 else 1.0 / p_model
+        if p_model == 0.0:
+            if probability.fair_odds is not None:
+                raise ValueEngineError(ValueReason.INVALID_MARKET_PROBABILITY)
+        elif (
             probability.fair_odds is None
             or not _finite_number(probability.fair_odds)
             or abs(probability.fair_odds - expected_fair_odds) > NUMERICAL_TOLERANCE
@@ -143,7 +147,6 @@ class ValueEngine:
             raise ValueEngineError(ValueReason.INVALID_UNCERTAINTY_MARGIN)
         uncertainty_margin_pp = float(uncertainty_margin_pp)
 
-        p_model = float(probability.p_model)
         p_cons = max(0.0, p_model - uncertainty_margin_pp / 100.0)
         p_break_even = 1.0 / market_odd
         conservative_fair_odds = None if p_cons == 0.0 else 1.0 / p_cons
