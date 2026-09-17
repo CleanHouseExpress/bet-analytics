@@ -96,7 +96,10 @@ def persist_market_probability_snapshot(
     ).mappings().one_or_none()
     if row is None:
         row = session.execute(
-            text("SELECT * FROM market_probability_snapshots WHERE evaluation_key = :evaluation_key"),
+            text(
+                "SELECT * FROM market_probability_snapshots "
+                "WHERE evaluation_key = :evaluation_key"
+            ),
             {"evaluation_key": key},
         ).mappings().one()
         if row["semantic_hash"] != digest:
