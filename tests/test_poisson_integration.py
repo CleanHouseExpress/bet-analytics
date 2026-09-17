@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -7,12 +8,14 @@ from sqlalchemy import text
 
 from apps.api.app.core.database import SessionLocal
 from apps.api.app.domain.history import Competition, Match, Season, Team
+from apps.api.app.domain.market_probability import Market
 from apps.api.app.domain.match_context import (
     AnalysisType,
     CompetitionFormat,
     MatchContext,
 )
 from apps.api.app.services.feature_engine import FeatureEngine
+from apps.api.app.services.market_probability import MarketProbabilityEngine
 from apps.api.app.services.poisson_model import PoissonModel
 from apps.api.app.services.poisson_snapshot import semantic_hash
 
@@ -194,6 +197,53 @@ def test_bets3_features_feed_poisson_v1(session):
     assert 0.0 < result.matrix_probability_mass <= 1.0
     assert result.tail_probability == pytest.approx(
         1.0 - result.matrix_probability_mass
+    )
+
+
+def test_bets3_bets4_feed_all_bets5_markets(session):
+    features = _features(session)
+    poisson = PoissonModel().calculate(features=features)
+    results = MarketProbabilityEngine().calculate_all(poisson=poisson)
+    by_market = {result.market: result for result in results}
+
+    assert len(results) == 6
+    assert set(by_market) == set(Market)
+
+    lambda_total = poisson.lambda_home + poisson.lambda_away
+
+    def cdf(maximum: int) -> float:
+        return math.fsum(
+            math.exp(-lambda_total)
+            * lambda_total**goals
+            / math.factorial(goals)
+            for goals in range(maximum + 1)
+        )
+
+    expected = {
+        Market.TOTAL_GOALS_OVER_1_5: 1.0 - cdf(1),
+        Market.TOTAL_GOALS_OVER_2_5: 1.0 - cdf(2),
+        Market.TOTAL_GOALS_UNDER_3_5: cdf(3),
+        Market.TOTAL_GOALS_UNDER_4_5: cdf(4),
+        Market.BTTS_YES: (
+            1.0
+            - math.exp(-poisson.lambda_home)
+            - math.exp(-poisson.lambda_away)
+            + math.exp(-lambda_total)
+        ),
+    }
+    expected[Market.BTTS_NO] = 1.0 - expected[Market.BTTS_YES]
+
+    for market, probability in expected.items():
+        result = by_market[market]
+        assert result.match_id == poisson.match_id
+        assert result.as_of == poisson.as_of
+        assert result.model_version == poisson.model_version
+        assert result.feature_engine_version == poisson.feature_engine_version
+        assert result.p_model == pytest.approx(probability, abs=1e-12)
+        assert result.fair_odds == pytest.approx(1.0 / probability, abs=1e-12)
+
+    assert by_market[Market.BTTS_YES].p_model + by_market[Market.BTTS_NO].p_model == pytest.approx(
+        1.0, abs=1e-12
     )
 
 
