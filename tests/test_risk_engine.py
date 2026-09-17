@@ -44,3 +44,11 @@ def test_invalid_recommended_payload_also_fails_closed():
  assert e.value.reason is RiskReason.INVALID_POSITION
 def test_hash_stable_order_independent():
  a=pos(Market.BTTS_YES,.5,pid="p1"); b=pos(Market.TOTAL_GOALS_OVER_1_5,.5,pid="p2"); eng=RiskEngine(); x=eng.calculate(value=value(),bankroll_amount=500,positions=(a,b),exposure_known=True,wallet_id="w1"); y=eng.calculate(value=value(),bankroll_amount=500,positions=(b,a),exposure_known=True,wallet_id="w1"); assert x.semantic_hash==y.semantic_hash and x.final_stake_units==y.final_stake_units
+def test_non_correlated_placed_only_consumes_capacity():
+ r=RiskEngine().calculate(value=value(ValueDecision.GO,Market.TOTAL_GOALS_OVER_1_5),bankroll_amount=500,positions=(pos(Market.TOTAL_GOALS_UNDER_4_5,1),),exposure_known=True,wallet_id="w1"); assert r.final_stake_units==1 and r.current_match_exposure_units==1
+def test_authoritative_zero_exposure_has_no_warning():
+ r=RiskEngine().calculate(value=value(),bankroll_amount=500,exposure_known=True); assert r.final_stake_units==1 and r.exposure_warning is None and r.reason is RiskReason.NO_CONFIRMED_EXPOSURE
+def test_wrong_match_placed_fails_closed():
+ p=replace(pos(Market.BTTS_YES),match_id=999)
+ with pytest.raises(RiskEngineError) as e: RiskEngine().calculate(value=value(),bankroll_amount=500,positions=(p,))
+ assert e.value.reason is RiskReason.INVALID_POSITION
