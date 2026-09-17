@@ -64,8 +64,20 @@ def _seed_match(session) -> None:
     )
     session.add_all(
         [
-            Team(id=HOME_TEAM_ID, name="BETS value home", country_code="BRA", created_at=now, updated_at=now),
-            Team(id=AWAY_TEAM_ID, name="BETS value away", country_code="BRA", created_at=now, updated_at=now),
+            Team(
+                id=HOME_TEAM_ID,
+                name="BETS value home",
+                country_code="BRA",
+                created_at=now,
+                updated_at=now,
+            ),
+            Team(
+                id=AWAY_TEAM_ID,
+                name="BETS value away",
+                country_code="BRA",
+                created_at=now,
+                updated_at=now,
+            ),
         ]
     )
     session.add(
