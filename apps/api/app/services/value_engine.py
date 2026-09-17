@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 NUMERICAL_TOLERANCE = 1e-12
 MIN_UNCERTAINTY_MARGIN_PP = 2.0
 MAX_UNCERTAINTY_MARGIN_PP = 5.0
+LOW_ODD_EXCEPTIONAL_FLOOR = 1.20
 
 
 class ValueEngineError(ValueError):
@@ -179,7 +180,7 @@ class ValueEngine:
 
             if candidate is ValueDecision.GO_PROTEGIDO:
                 odd_min = 1.03 / p_cons
-                if market_odd < 1.20 and ev_cons < 0.03 - NUMERICAL_TOLERANCE:
+                if market_odd < LOW_ODD_EXCEPTIONAL_FLOOR and ev_cons < 0.03 - NUMERICAL_TOLERANCE:
                     decision = ValueDecision.NO_GO
                     reason = ValueReason.LOW_ODD_REQUIRES_EXCEPTIONAL_EVIDENCE
                 elif (
@@ -192,8 +193,16 @@ class ValueEngine:
                     decision = candidate
             else:
                 denominator = p_cons - required_edge_pp / 100.0
-                odd_min = None if denominator <= 0.0 else max(1.0 / denominator, 1.0 / p_cons)
-                if market_odd < 1.20:
+                edge_odd_min = None if denominator <= 0.0 else max(
+                    1.0 / denominator,
+                    1.0 / p_cons,
+                )
+                odd_min = (
+                    None
+                    if edge_odd_min is None
+                    else max(edge_odd_min, LOW_ODD_EXCEPTIONAL_FLOOR)
+                )
+                if market_odd < LOW_ODD_EXCEPTIONAL_FLOOR:
                     decision = ValueDecision.NO_GO
                     reason = ValueReason.LOW_ODD_REQUIRES_EXCEPTIONAL_EVIDENCE
                 elif ev_cons <= NUMERICAL_TOLERANCE:
