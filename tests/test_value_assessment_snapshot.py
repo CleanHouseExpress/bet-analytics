@@ -113,6 +113,25 @@ def test_value_snapshot_key_and_hash_ignore_calculated_at():
     assert semantic_hash(first) == semantic_hash(second)
 
 
+def test_value_snapshot_odds_provenance_changes_identity():
+    first = result()
+    observed = replace(
+        first,
+        odd_source="betano",
+        odd_observed_at=datetime(2026, 9, 15, 16, 5, tzinfo=UTC),
+    )
+    later = replace(
+        observed,
+        odd_observed_at=datetime(2026, 9, 15, 16, 10, tzinfo=UTC),
+    )
+    other_source = replace(observed, odd_source="novibet")
+
+    assert evaluation_key(first) != evaluation_key(observed)
+    assert evaluation_key(observed) != evaluation_key(later)
+    assert evaluation_key(observed) != evaluation_key(other_source)
+    assert semantic_hash(observed) != semantic_hash(later)
+
+
 def test_value_snapshot_semantic_change_changes_hash():
     first = result()
     changed = replace(first, edge_pp=first.edge_pp + 1.0)
