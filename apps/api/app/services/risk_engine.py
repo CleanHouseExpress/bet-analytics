@@ -21,7 +21,7 @@ class RiskEngine:
  def _calculate(self,v,b,up,positions,known,wallet):
   if not isinstance(v,ValueAssessment): raise RiskEngineError(RiskReason.INVALID_VALUE_ASSESSMENT)
   if v.value_engine_version!=VALUE_ENGINE_VERSION: raise RiskEngineError(RiskReason.INCOMPATIBLE_VALUE_ENGINE_VERSION)
-  if v.match_id<=0 or v.as_of.tzinfo is None or v.as_of.utcoffset() is None or v.decision not in BASE_STAKE: raise RiskEngineError(RiskReason.INVALID_VALUE_ASSESSMENT)
+  if v.match_id<=0 or v.as_of.tzinfo is None or v.as_of.utcoffset() is None or not isinstance(v.market,Market) or not isinstance(v.decision,ValueDecision) or not v.market_engine_version.strip() or not v.model_version.strip() or not v.feature_engine_version.strip() or not _finite(v.p_model) or not 0<=v.p_model<=1 or not _finite(v.market_odd) or v.market_odd<=1: raise RiskEngineError(RiskReason.INVALID_VALUE_ASSESSMENT)
   if not _finite(b) or float(b)<=0: raise RiskEngineError(RiskReason.INVALID_BANKROLL)
   if not _finite(up) or float(up)<=0 or abs(float(up)-DEFAULT_UNIT_PERCENT)>1e-12: raise RiskEngineError(RiskReason.INVALID_UNIT_PERCENT)
   b=float(b); up=float(up); uv=b*up; base=BASE_STAKE[v.decision]; placed=[]
