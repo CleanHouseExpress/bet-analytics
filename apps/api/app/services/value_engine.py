@@ -179,7 +179,10 @@ class ValueEngine:
                 if market_odd < 1.20 and ev_cons < 0.03 - NUMERICAL_TOLERANCE:
                     decision = ValueDecision.NO_GO
                     reason = ValueReason.LOW_ODD_REQUIRES_EXCEPTIONAL_EVIDENCE
-                elif p_cons <= p_break_even + NUMERICAL_TOLERANCE or ev_cons < 0.03 - NUMERICAL_TOLERANCE:
+                elif (
+                    p_cons <= p_break_even + NUMERICAL_TOLERANCE
+                    or ev_cons < 0.03 - NUMERICAL_TOLERANCE
+                ):
                     decision = ValueDecision.NO_GO
                     reason = ValueReason.NON_POSITIVE_CONSERVATIVE_EV
                 else:
