@@ -31,6 +31,15 @@ def _positive_finite(value: float) -> bool:
     return math.isfinite(value) and value > 0.0
 
 
+def _valid_probability_component(value: object) -> bool:
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+        and value >= 0.0
+    )
+
+
 def _bounded_probability(value: float) -> float:
     if not math.isfinite(value):
         raise MarketProbabilityError(
@@ -58,6 +67,57 @@ def _poisson_cdf(lambda_: float, maximum: int) -> float:
         term *= lambda_ / k
         probability += term
     return _bounded_probability(probability)
+
+
+def _validate_poisson_distribution(poisson: PoissonResult) -> None:
+    if poisson.max_goals < 0 or not poisson.feature_engine_version.strip():
+        raise MarketProbabilityError(MarketProbabilityReason.INVALID_POISSON_RESULT)
+
+    expected_size = poisson.max_goals + 1
+    marginals = (
+        poisson.home_goal_probabilities,
+        poisson.away_goal_probabilities,
+    )
+    if any(len(marginal) != expected_size for marginal in marginals):
+        raise MarketProbabilityError(MarketProbabilityReason.INVALID_POISSON_RESULT)
+    if any(
+        not _valid_probability_component(value)
+        for marginal in marginals
+        for value in marginal
+    ):
+        raise MarketProbabilityError(MarketProbabilityReason.INVALID_POISSON_RESULT)
+
+    if len(poisson.score_matrix) != expected_size or any(
+        len(row) != expected_size for row in poisson.score_matrix
+    ):
+        raise MarketProbabilityError(MarketProbabilityReason.INVALID_POISSON_RESULT)
+    if any(
+        not _valid_probability_component(value)
+        for row in poisson.score_matrix
+        for value in row
+    ):
+        raise MarketProbabilityError(MarketProbabilityReason.INVALID_POISSON_RESULT)
+
+    recomputed_mass = math.fsum(
+        math.fsum(float(value) for value in row) for row in poisson.score_matrix
+    )
+    if not (
+        math.isfinite(poisson.matrix_probability_mass)
+        and math.isfinite(poisson.tail_probability)
+        and -NUMERICAL_TOLERANCE
+        <= poisson.matrix_probability_mass
+        <= 1.0 + NUMERICAL_TOLERANCE
+        and -NUMERICAL_TOLERANCE
+        <= poisson.tail_probability
+        <= 1.0 + NUMERICAL_TOLERANCE
+        and abs(recomputed_mass - poisson.matrix_probability_mass)
+        <= NUMERICAL_TOLERANCE
+        and abs(poisson.tail_probability - (1.0 - recomputed_mass))
+        <= NUMERICAL_TOLERANCE
+    ):
+        raise MarketProbabilityError(
+            MarketProbabilityReason.INVALID_PROBABILITY_MASS
+        )
 
 
 class MarketProbabilityEngine:
@@ -140,23 +200,8 @@ class MarketProbabilityEngine:
             and _positive_finite(poisson.lambda_away)
         ):
             raise MarketProbabilityError(MarketProbabilityReason.INVALID_LAMBDA)
-        if not (
-            math.isfinite(poisson.matrix_probability_mass)
-            and math.isfinite(poisson.tail_probability)
-            and -NUMERICAL_TOLERANCE
-            <= poisson.matrix_probability_mass
-            <= 1.0 + NUMERICAL_TOLERANCE
-            and -NUMERICAL_TOLERANCE
-            <= poisson.tail_probability
-            <= 1.0 + NUMERICAL_TOLERANCE
-            and abs(
-                poisson.matrix_probability_mass + poisson.tail_probability - 1.0
-            )
-            <= NUMERICAL_TOLERANCE
-        ):
-            raise MarketProbabilityError(
-                MarketProbabilityReason.INVALID_PROBABILITY_MASS
-            )
+
+        _validate_poisson_distribution(poisson)
 
         try:
             market_enum = market if isinstance(market, Market) else Market(market)
