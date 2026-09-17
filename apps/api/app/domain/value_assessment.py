@@ -51,7 +51,7 @@ class ValueAssessment:
     uncertainty_margin_pp: float
     p_cons: float
     p_break_even: float
-    fair_odds: float
+    fair_odds: float | None
     conservative_fair_odds: float | None
     required_edge_pp: float | None
     edge_pp: float
