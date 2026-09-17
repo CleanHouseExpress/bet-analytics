@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 
+
 MARKET_ENGINE_VERSION = "market-probability-v1"
 
 
