@@ -45,6 +45,8 @@ def semantic_hash(result: ValueAssessment) -> str:
 
 
 def evaluation_key(result: ValueAssessment) -> str:
+    odd_source = result.odd_source or ""
+    odd_observed_at = result.odd_observed_at.isoformat() if result.odd_observed_at else ""
     return ":".join(
         (
             str(result.match_id),
@@ -56,6 +58,8 @@ def evaluation_key(result: ValueAssessment) -> str:
             result.feature_engine_version,
             format(result.market_odd, ".17g"),
             format(result.uncertainty_margin_pp, ".17g"),
+            odd_source,
+            odd_observed_at,
         )
     )
 
