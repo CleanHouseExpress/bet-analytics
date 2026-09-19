@@ -60,6 +60,8 @@ class RiskAssessment:
     market_engine_version: str
     model_version: str
     feature_engine_version: str
+    value_semantic_hash: str
+    exposure_semantic_hash: str
     value_decision: ValueDecision
     bankroll_amount: float
     unit_percent: float
