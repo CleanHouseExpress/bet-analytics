@@ -114,6 +114,7 @@ class BacktestEvaluation:
     stake_units: float
     stake_value: float
     settlement_result: SettlementResult | None
+    settled_at: datetime | None
     profit_loss: float | None
     journal_entry: DecisionJournalEntry | None
     feature_semantic_hash: str | None
