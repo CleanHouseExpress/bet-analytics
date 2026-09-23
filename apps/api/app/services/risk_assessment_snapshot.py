@@ -28,7 +28,17 @@ def _jsonable(value: object) -> object:
 
 def _canonical_positions(
     positions: tuple[OpenPosition, ...],
+    *,
+    match_id: int,
 ) -> list[dict[str, object]]:
+    for position in positions:
+        if not isinstance(position, OpenPosition):
+            raise RiskAssessmentConflictError("RISK_ASSESSMENT_INVALID_POSITION")
+        if not isinstance(position.status, PositionStatus):
+            raise RiskAssessmentConflictError("RISK_ASSESSMENT_INVALID_POSITION")
+        if position.status is PositionStatus.PLACED and position.match_id != match_id:
+            raise RiskAssessmentConflictError("RISK_ASSESSMENT_EXPOSURE_MATCH_MISMATCH")
+
     placed = [
         {
             "position_id": position.position_id,
@@ -78,33 +88,12 @@ def persist_risk_assessment(
     positions: tuple[OpenPosition, ...],
 ) -> int:
     payload = {key: _jsonable(value) for key, value in asdict(assessment).items()}
-    canonical_positions = _canonical_positions(positions)
+    canonical_positions = _canonical_positions(
+        positions,
+        match_id=assessment.match_id,
+    )
     if _exposure_hash(canonical_positions) != assessment.exposure_semantic_hash:
         raise RiskAssessmentConflictError("RISK_ASSESSMENT_EXPOSURE_MISMATCH")
-
-    existing = conn.execute(
-        text(
-            "SELECT id, assessment_json, positions_json "
-            "FROM risk_assessment_snapshots WHERE semantic_hash=:hash"
-        ),
-        {"hash": assessment.semantic_hash},
-    ).mappings().first()
-    if existing:
-        old_assessment = existing["assessment_json"]
-        old_positions = existing["positions_json"]
-        if isinstance(old_assessment, str):
-            old_assessment = json.loads(old_assessment)
-        if isinstance(old_positions, str):
-            old_positions = json.loads(old_positions)
-        old_assessment = dict(old_assessment)
-        old_assessment.pop("calculated_at", None)
-        current = dict(payload)
-        current.pop("calculated_at", None)
-        if old_assessment != current or old_positions != canonical_positions:
-            raise RiskAssessmentConflictError(
-                "RISK_ASSESSMENT_SEMANTIC_CONFLICT"
-            )
-        return int(existing["id"])
 
     sql = """
         INSERT INTO risk_assessment_snapshots (
@@ -117,11 +106,19 @@ def persist_risk_assessment(
             :hash, :match_id, :as_of, :market, :risk, :value, :market_engine,
             :model, :feature, :value_hash, :exposure_hash, :bankroll, :unit,
             :known, :positions, :assessment, :calculated_at
-        ) RETURNING id
+        )
     """
     if conn.dialect.name == "postgresql":
         sql = sql.replace(":positions", "CAST(:positions AS JSON)")
         sql = sql.replace(":assessment", "CAST(:assessment AS JSON)")
+        sql += " ON CONFLICT (semantic_hash) DO NOTHING RETURNING id"
+    else:
+        sql = sql.replace(
+            "INSERT INTO risk_assessment_snapshots",
+            "INSERT OR IGNORE INTO risk_assessment_snapshots",
+            1,
+        )
+        sql += " RETURNING id"
 
     row = conn.execute(
         text(sql),
@@ -144,5 +141,27 @@ def persist_risk_assessment(
             "assessment": json.dumps(payload, sort_keys=True),
             "calculated_at": assessment.calculated_at,
         },
-    ).scalar_one()
-    return int(row)
+    ).scalar_one_or_none()
+    if row is not None:
+        return int(row)
+
+    existing = conn.execute(
+        text(
+            "SELECT id, assessment_json, positions_json "
+            "FROM risk_assessment_snapshots WHERE semantic_hash=:hash"
+        ),
+        {"hash": assessment.semantic_hash},
+    ).mappings().one()
+    old_assessment = existing["assessment_json"]
+    old_positions = existing["positions_json"]
+    if isinstance(old_assessment, str):
+        old_assessment = json.loads(old_assessment)
+    if isinstance(old_positions, str):
+        old_positions = json.loads(old_positions)
+    old_assessment = dict(old_assessment)
+    old_assessment.pop("calculated_at", None)
+    current = dict(payload)
+    current.pop("calculated_at", None)
+    if old_assessment != current or old_positions != canonical_positions:
+        raise RiskAssessmentConflictError("RISK_ASSESSMENT_SEMANTIC_CONFLICT")
+    return int(existing["id"])
