@@ -27,7 +27,10 @@ jobs:
         run: docker compose run --rm --no-deps api alembic upgrade head
 
       - name: Run Motor 01 phase acceptance on real Brasileirão data
-        run: docker compose run --rm --no-deps api python scripts/qa_motor01_phase.py
+        run: |
+          docker compose run --rm --no-deps \
+            -v "$PWD/docs:/app/docs:ro" \
+            api python scripts/qa_motor01_phase.py
 
       - name: Run focused fail-closed and integration regressions
         run: |
