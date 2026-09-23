@@ -731,8 +731,7 @@ class WalkForwardBacktest:
                 match_id=match_id,
                 as_of=round_as_of,
             )
-            poisson = PoissonModel().calculate(features=features)
-        except (BacktestDataError, PoissonModelError) as exc:
+        except BacktestDataError as exc:
             reason = str(exc)
             return [
                 self._blocked_evaluation(
@@ -750,7 +749,6 @@ class WalkForwardBacktest:
             ]
 
         feature_hash = feature_semantic_hash(features)
-        poisson_hash = poisson_semantic_hash(poisson)
         feature_payload = json.dumps(
             feature_semantic_payload(features),
             sort_keys=True,
@@ -758,6 +756,28 @@ class WalkForwardBacktest:
             ensure_ascii=True,
             allow_nan=False,
         )
+        try:
+            poisson = PoissonModel().calculate(features=features)
+        except PoissonModelError as exc:
+            reason = str(exc)
+            return [
+                self._blocked_evaluation(
+                    config=config,
+                    match=match,
+                    round_number=round_number,
+                    round_as_of=round_as_of,
+                    market=market,
+                    baseline_probability=baseline.get(market),
+                    actual_outcome=_market_outcome(market, home_score, away_score),
+                    settled_at=settled_at,
+                    reason=reason,
+                    feature_hash=feature_hash,
+                    feature_payload=feature_payload,
+                )
+                for market in config.markets
+            ]
+
+        poisson_hash = poisson_semantic_hash(poisson)
         model_side = (
             "HOME"
             if poisson.lambda_home > poisson.lambda_away + 1e-12
