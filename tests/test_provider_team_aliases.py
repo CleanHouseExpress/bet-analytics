@@ -111,6 +111,15 @@ def test_known_provider_alias_reuses_canonical_team_and_saves_mapping() -> None:
         assert db.execute(
             text("SELECT count(*) FROM teams WHERE name='Clube Atlético Mineiro'")
         ).scalar_one() == 0
+        assert db.execute(
+            text(
+                """
+                SELECT count(*)
+                FROM team_aliases
+                WHERE normalized_alias='mineiro'
+                """
+            )
+        ).scalar_one() == 0
         db.rollback()
 
 
@@ -202,4 +211,42 @@ def test_conflicting_provider_alias_evidence_fails_closed() -> None:
                 """
             )
         ).scalar_one() == 0
+        db.rollback()
+
+
+def test_stale_provider_mapping_conflicting_with_catalog_fails_closed() -> None:
+    provider = FootballDataAliasTestProvider()
+
+    with SessionLocal() as db:
+        wrong_id = _insert_team(db, "Wrong Atlético Mapping")
+        db.execute(
+            text(
+                """
+                INSERT INTO external_entity_mappings (
+                    entity_type, internal_id, provider, external_id
+                ) VALUES (
+                    'team', :internal_id, 'football-data', 'fd-stale-atletico'
+                )
+                """
+            ),
+            {"internal_id": wrong_id},
+        )
+        service = FootballIngestionService(db, provider)
+
+        try:
+            service._upsert_team(
+                ProviderTeam(
+                    external_id="fd-stale-atletico",
+                    name="Provider Full Atlético Name",
+                    country_code="BRA",
+                    aliases=("Mineiro",),
+                ),
+                strict_reconciliation=True,
+            )
+        except ValueError as exc:
+            assert "MAPPED_TEAM_IDENTITY_CONFLICT" in str(exc)
+            assert "Atlético-MG" in str(exc)
+        else:
+            raise AssertionError("stale provider mapping must fail closed")
+
         db.rollback()
