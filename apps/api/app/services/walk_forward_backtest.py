@@ -412,7 +412,6 @@ class WalkForwardBacktest:
         self._validate_config(config)
         matches = self._load_matches(config)
         self._validate_match_set(matches)
-        self._validate_dataset_coverage(matches, config)
         found_seasons = {str(row["season"]) for row in matches}
         missing_seasons = set(config.seasons) - found_seasons
         if missing_seasons:
@@ -420,6 +419,7 @@ class WalkForwardBacktest:
                 "MISSING_BACKTEST_SEASONS:"
                 + ",".join(sorted(missing_seasons))
             )
+        self._validate_dataset_coverage(matches, config)
         competition_ids = {int(row["competition_id"]) for row in matches}
         if len(competition_ids) != 1:
             raise BacktestDataError("AMBIGUOUS_BACKTEST_COMPETITION")
@@ -642,6 +642,25 @@ class WalkForwardBacktest:
         matches: list[dict[str, object]],
         config: BacktestConfig,
     ) -> None:
+        for manifest in config.coverage_manifest:
+            if (
+                not manifest.season.strip()
+                or manifest.minimum_matches <= 0
+                or manifest.expected_teams <= 1
+                or not manifest.minimum_matches_by_round
+                or not manifest.source.strip()
+            ):
+                raise BacktestDataError("INVALID_BACKTEST_COVERAGE_MANIFEST")
+            round_numbers = [
+                round_number
+                for round_number, expected_min in manifest.minimum_matches_by_round
+                if round_number > 0 and expected_min > 0
+            ]
+            if len(round_numbers) != len(manifest.minimum_matches_by_round):
+                raise BacktestDataError("INVALID_BACKTEST_COVERAGE_MANIFEST")
+            if len(set(round_numbers)) != len(round_numbers):
+                raise BacktestDataError("DUPLICATE_BACKTEST_MANIFEST_ROUND")
+
         manifests = {item.season: item for item in config.coverage_manifest}
         if len(manifests) != len(config.coverage_manifest):
             raise BacktestDataError("DUPLICATE_BACKTEST_COVERAGE_MANIFEST")
