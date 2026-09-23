@@ -175,7 +175,6 @@ class RiskEngine:
             or not value.market_engine_version.strip()
             or not value.model_version.strip()
             or not value.feature_engine_version.strip()
-            or not value.semantic_hash
             or not _finite(value.p_model)
             or not 0 <= value.p_model <= 1
             or not _finite(value.market_odd)
@@ -329,7 +328,7 @@ class RiskEngine:
             value.market_engine_version,
             value.model_version,
             value.feature_engine_version,
-            value.semantic_hash,
+            value_hash,
             exposure_hash,
             value.decision,
             bankroll,
