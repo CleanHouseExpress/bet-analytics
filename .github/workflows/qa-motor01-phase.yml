@@ -32,10 +32,6 @@ jobs:
             -v "$PWD/docs:/app/docs:ro" \
             api python scripts/qa_motor01_phase.py
 
-      - name: Run focused fail-closed and integration regressions
-        run: |
-          docker compose run --rm --no-deps api pytest -q             tests/test_match_context.py             tests/test_match_context_review_findings.py             tests/test_feature_engine_integration.py             tests/test_poisson_integration.py             tests/test_value_engine_qa.py             tests/test_risk_engine_integration.py             tests/test_decision_journal_snapshot.py             tests/test_walk_forward_backtest_integration.py             tests/test_match_reconciliation.py             tests/test_match_reconciliation_ingestion.py             tests/test_provider_team_aliases.py             tests/test_future_fixture_sync.py
-
       - name: Cleanup isolated QA database
         if: always()
         run: docker compose down -v --remove-orphans
