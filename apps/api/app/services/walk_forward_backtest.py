@@ -25,10 +25,8 @@ from apps.api.app.domain.backtest import (
     BacktestSegment,
     CalibrationBucket,
 )
-from apps.api.app.domain.decision_journal import (
-    AnalysisType as JournalAnalysisType,
-    SettlementResult,
-)
+from apps.api.app.domain.decision_journal import AnalysisType as JournalAnalysisType
+from apps.api.app.domain.decision_journal import SettlementResult
 from apps.api.app.domain.features import (
     FEATURE_ENGINE_VERSION,
     CompetitionBaseline,
@@ -43,10 +41,8 @@ from apps.api.app.domain.risk_assessment import OpenPosition, PositionStatus
 from apps.api.app.domain.value_assessment import ValueDecision
 from apps.api.app.services.decision_journal import DecisionJournal
 from apps.api.app.services.feature_engine import _form
-from apps.api.app.services.feature_snapshot import (
-    semantic_hash as feature_semantic_hash,
-    semantic_payload as feature_semantic_payload,
-)
+from apps.api.app.services.feature_snapshot import semantic_hash as feature_semantic_hash
+from apps.api.app.services.feature_snapshot import semantic_payload as feature_semantic_payload
 from apps.api.app.services.market_probability import (
     MarketProbabilityEngine,
     MarketProbabilityError,
