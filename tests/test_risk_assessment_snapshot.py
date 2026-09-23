@@ -1,9 +1,12 @@
 import json
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import create_engine, text
 
+from apps.api.app.core.database import engine as postgres_engine
 from apps.api.app.domain.market_probability import Market
 from apps.api.app.domain.risk_assessment import OpenPosition, PositionStatus
 from apps.api.app.domain.value_assessment import (
@@ -133,6 +136,79 @@ def test_same_hash_divergent_payload_conflicts():
         persist_risk_assessment(conn, assessment, ())
     conn.close()
     engine.dispose()
+
+
+def test_persist_rejects_placed_position_from_other_match():
+    engine, conn = _setup()
+    positions = (
+        OpenPosition(
+            "p1",
+            1532,
+            Market.BTTS_YES,
+            0.5,
+            PositionStatus.PLACED,
+            "w1",
+        ),
+    )
+    assessment = RiskEngine().calculate(
+        value=_value(),
+        bankroll_amount=500,
+        positions=positions,
+        exposure_known=True,
+        wallet_id="w1",
+    )
+    wrong_match = (replace(positions[0], match_id=999),)
+    with pytest.raises(
+        RiskAssessmentConflictError,
+        match="RISK_ASSESSMENT_EXPOSURE_MATCH_MISMATCH",
+    ):
+        persist_risk_assessment(conn, assessment, wrong_match)
+    conn.close()
+    engine.dispose()
+
+
+def test_postgres_concurrent_snapshot_is_idempotent():
+    assessment = RiskEngine().calculate(
+        value=_value(),
+        bankroll_amount=500,
+        exposure_known=True,
+    )
+    with postgres_engine.begin() as conn:
+        conn.execute(
+            text(
+                "DELETE FROM risk_assessment_snapshots "
+                "WHERE semantic_hash=:hash"
+            ),
+            {"hash": assessment.semantic_hash},
+        )
+
+    def persist_once():
+        with postgres_engine.begin() as conn:
+            return persist_risk_assessment(conn, assessment, ())
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        ids = list(pool.map(lambda _: persist_once(), range(2)))
+
+    try:
+        assert ids[0] == ids[1]
+        with postgres_engine.connect() as conn:
+            count = conn.execute(
+                text(
+                    "SELECT count(*) FROM risk_assessment_snapshots "
+                    "WHERE semantic_hash=:hash"
+                ),
+                {"hash": assessment.semantic_hash},
+            ).scalar_one()
+        assert count == 1
+    finally:
+        with postgres_engine.begin() as conn:
+            conn.execute(
+                text(
+                    "DELETE FROM risk_assessment_snapshots "
+                    "WHERE semantic_hash=:hash"
+                ),
+                {"hash": assessment.semantic_hash},
+            )
 
 
 def test_persist_rejects_positions_different_from_calculation():
