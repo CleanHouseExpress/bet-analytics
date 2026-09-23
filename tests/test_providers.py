@@ -1,3 +1,4 @@
+import asyncio
 from datetime import UTC, datetime
 
 import pytest
@@ -100,6 +101,32 @@ def test_football_data_maps_fixture() -> None:
     assert fixture.status == "scheduled"
     assert fixture.home_score is None
     assert fixture.away_score is None
+
+
+def test_football_data_propagates_explicit_competition_type(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = FootballDataOrgProvider(api_token="test-token")
+
+    async def fake_get(path: str, params=None):
+        assert path == "/competitions"
+        assert params is None
+        return {
+            "competitions": [
+                {
+                    "id": 2013,
+                    "name": "Brasileirão Série A",
+                    "type": "LEAGUE",
+                    "area": {"code": "BRA"},
+                }
+            ]
+        }
+
+    monkeypatch.setattr(provider, "_get", fake_get)
+    competitions = asyncio.run(provider.get_competitions())
+
+    assert len(competitions) == 1
+    assert competitions[0].competition_type == "LEAGUE"
 
 
 def test_football_data_requires_season_discovery_before_teams_or_fixtures() -> None:
