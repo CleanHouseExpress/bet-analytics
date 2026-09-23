@@ -1,12 +1,18 @@
+import csv
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 
 from apps.api.app.domain.backtest import (
+    BACKTEST_VERSION,
+    DEFAULT_BACKTEST_COVERAGE_MANIFEST,
+    BacktestConfig,
     BacktestEvaluation,
     BacktestEvaluationStatus,
     BacktestPromotionStatus,
+    SeasonCoverageManifest,
 )
 from apps.api.app.domain.decision_journal import SettlementResult
 from apps.api.app.domain.market_probability import Market
@@ -162,6 +168,104 @@ def test_duplicate_fixture_gate_fails_closed():
     duplicate = {**base, "match_id": 2}
     with pytest.raises(BacktestDataError, match="DUPLICATE_FIXTURE"):
         WalkForwardBacktest._validate_match_set([base, duplicate])
+
+
+def test_default_manifest_matches_trusted_checked_in_datasets():
+    assert BACKTEST_VERSION == "walk-forward-motor-01-v2"
+
+    for manifest in DEFAULT_BACKTEST_COVERAGE_MANIFEST:
+        with Path(manifest.source).open("r", encoding="utf-8-sig", newline="") as handle:
+            rows = list(csv.DictReader(handle))
+
+        season_rows = [
+            row for row in rows if str(row.get("season") or "").strip() == manifest.season
+        ]
+        assert len(season_rows) >= manifest.minimum_matches
+
+        teams = {
+            str(row[field]).strip()
+            for row in season_rows
+            for field in ("home_team", "away_team")
+        }
+        assert len(teams) == manifest.expected_teams
+
+        round_counts: dict[int, int] = {}
+        for row in season_rows:
+            round_number = int(row["round"])
+            round_counts[round_number] = round_counts.get(round_number, 0) + 1
+
+        for round_number, expected_min in manifest.minimum_matches_by_round:
+            assert round_counts.get(round_number, 0) >= expected_min
+
+
+def test_dataset_coverage_rejects_partially_loaded_season():
+    kickoff = datetime(2026, 1, 1, 20, tzinfo=UTC)
+    matches = [
+        {
+            "match_id": 1,
+            "season": "2099",
+            "round_number": 1,
+            "home_team_id": 10,
+            "away_team_id": 20,
+            "kickoff_at": kickoff,
+        }
+    ]
+    config = BacktestConfig(
+        seasons=("2099",),
+        coverage_manifest=(
+            SeasonCoverageManifest(
+                season="2099",
+                minimum_matches=2,
+                expected_teams=4,
+                minimum_matches_by_round=((1, 2),),
+                source="test-manifest",
+            ),
+        ),
+    )
+
+    with pytest.raises(BacktestDataError, match="INCOMPLETE_BACKTEST_SEASON"):
+        WalkForwardBacktest._validate_dataset_coverage(matches, config)
+
+
+def test_dataset_coverage_requires_manifest_for_requested_season():
+    config = BacktestConfig(
+        seasons=("2099",),
+        coverage_manifest=(),
+    )
+
+    with pytest.raises(
+        BacktestDataError,
+        match="MISSING_TRUSTED_DATASET_MANIFEST:2099",
+    ):
+        WalkForwardBacktest._validate_dataset_coverage([], config)
+
+
+def test_simultaneous_settlements_are_netted_before_equity_snapshot():
+    settled_at = datetime(2026, 1, 1, 22, tzinfo=UTC)
+    equity_curve = [500.0]
+
+    bankroll, remaining = WalkForwardBacktest._apply_pending_cashflows(
+        500.0,
+        [
+            (settled_at, 100.0),
+            (settled_at, -100.0),
+        ],
+        settled_at,
+        equity_curve,
+    )
+
+    assert bankroll == 500.0
+    assert remaining == []
+    assert equity_curve == [500.0, 500.0]
+
+    metrics = WalkForwardBacktest._metrics(
+        [],
+        initial_bankroll=500.0,
+        ending_bankroll=bankroll,
+        equity_curve=equity_curve,
+        min_sample_for_review=100,
+    )
+    assert metrics.max_drawdown == 0.0
 
 
 def test_minimum_sample_gate_prevents_small_sample_promotion():
