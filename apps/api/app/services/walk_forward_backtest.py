@@ -61,6 +61,7 @@ from apps.api.app.services.value_engine import ValueEngine, ValueEngineError
 logger = logging.getLogger(__name__)
 
 SAO_PAULO = ZoneInfo("America/Sao_Paulo")
+BACKTEST_CONTEXT_VERSION = f"{CLASSIFIER_VERSION}-event-time-backtest-v1"
 GO_DECISIONS = frozenset(
     {
         ValueDecision.GO_CONDICIONAL,
@@ -376,7 +377,7 @@ class HistoricalFeatureEngine:
             match_id=match_id,
             as_of=as_of,
             calculated_at=datetime.now(UTC),
-            context_classifier_version=CLASSIFIER_VERSION,
+            context_classifier_version=BACKTEST_CONTEXT_VERSION,
             feature_engine_version=FEATURE_ENGINE_VERSION,
             home_last5=_form(home_all, target.home_team_id, 5),
             home_last10=_form(home_all, target.home_team_id, 10),
