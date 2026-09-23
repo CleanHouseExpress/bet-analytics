@@ -103,6 +103,36 @@ def test_football_data_maps_fixture() -> None:
     assert fixture.away_score is None
 
 
+def test_football_data_prefers_full_team_name_and_exposes_short_name_as_alias(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = FootballDataOrgProvider(api_token="test-token")
+    provider._season_context["season-2026"] = ("2013", 2026)
+
+    async def fake_get(path: str, params=None):
+        assert path == "/competitions/2013/teams"
+        assert params == {"season": "2026"}
+        return {
+            "teams": [
+                {
+                    "id": 1765,
+                    "name": "Clube Atlético Mineiro",
+                    "shortName": "Mineiro",
+                    "tla": "CAM",
+                    "area": {"code": "BRA"},
+                }
+            ]
+        }
+
+    monkeypatch.setattr(provider, "_get", fake_get)
+    teams = asyncio.run(provider.get_teams("season-2026"))
+
+    assert len(teams) == 1
+    assert teams[0].name == "Clube Atlético Mineiro"
+    assert teams[0].aliases == ("Mineiro",)
+    assert teams[0].raw["tla"] == "CAM"
+
+
 def test_football_data_propagates_explicit_competition_type(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
