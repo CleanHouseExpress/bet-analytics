@@ -1,6 +1,6 @@
 """add explicit competition format provenance
 
-Revision ID: 0015_competition_format_provenance
+Revision ID: 0015_comp_format_provenance
 Revises: 0014_walk_forward_backtest
 Create Date: 2026-09-23
 """
@@ -10,7 +10,7 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0015_competition_format_provenance"
+revision: str = "0015_comp_format_provenance"
 down_revision: str | None = "0014_walk_forward_backtest"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
