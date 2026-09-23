@@ -22,6 +22,37 @@ def persist_match_context_snapshot(
     if not evaluation_key.strip():
         raise ValueError("evaluation_key is required")
 
+    expected = asdict(context)
+    expected["competition_format"] = context.competition_format.value
+    expected["analysis_type"] = context.analysis_type.value
+
+    sql = """
+        INSERT INTO match_context_snapshots (
+            evaluation_key, match_id, competition_id, season_id,
+            competition_format, analysis_type, as_of, classified_at,
+            classifier_version
+        ) VALUES (
+            :evaluation_key, :match_id, :competition_id, :season_id,
+            :competition_format, :analysis_type, :as_of, :classified_at,
+            :classifier_version
+        )
+    """
+    if session.get_bind().dialect.name == "postgresql":
+        sql += " ON CONFLICT (evaluation_key) DO NOTHING RETURNING evaluation_key"
+    else:
+        sql = sql.replace(
+            "INSERT INTO match_context_snapshots",
+            "INSERT OR IGNORE INTO match_context_snapshots",
+            1,
+        )
+        sql += " RETURNING evaluation_key"
+
+    inserted = session.execute(
+        text(sql),
+        {"evaluation_key": evaluation_key, **expected},
+    ).scalar_one_or_none()
+    session.flush()
+
     existing = session.execute(
         text(
             """
@@ -33,35 +64,14 @@ def persist_match_context_snapshot(
             """
         ),
         {"evaluation_key": evaluation_key},
-    ).mappings().one_or_none()
+    ).mappings().one()
 
-    expected = asdict(context)
-    expected["competition_format"] = context.competition_format.value
-    expected["analysis_type"] = context.analysis_type.value
+    comparable = {key: existing[key] for key in expected}
+    if comparable != expected:
+        raise MatchContextSnapshotConflict(
+            "evaluation_key already has a different immutable match context snapshot"
+        )
 
-    if existing is not None:
-        comparable = {key: existing[key] for key in expected}
-        if comparable != expected:
-            raise MatchContextSnapshotConflict(
-                "evaluation_key already has a different immutable match context snapshot"
-            )
+    if inserted is None:
         return dict(existing)
-
-    session.execute(
-        text(
-            """
-            INSERT INTO match_context_snapshots (
-                evaluation_key, match_id, competition_id, season_id,
-                competition_format, analysis_type, as_of, classified_at,
-                classifier_version
-            ) VALUES (
-                :evaluation_key, :match_id, :competition_id, :season_id,
-                :competition_format, :analysis_type, :as_of, :classified_at,
-                :classifier_version
-            )
-            """
-        ),
-        {"evaluation_key": evaluation_key, **expected},
-    )
-    session.flush()
     return {"evaluation_key": evaluation_key, **expected}

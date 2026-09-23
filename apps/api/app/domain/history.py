@@ -12,7 +12,8 @@ class Competition(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     country_code: Mapped[str | None] = mapped_column(String(3), nullable=True)
-    competition_type: Mapped[str] = mapped_column(String(32), nullable=False, default="league")
+    competition_type: Mapped[str] = mapped_column(String(32), nullable=False, default="unknown")
+    competition_type_source: Mapped[str | None] = mapped_column(String(120), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 

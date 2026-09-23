@@ -9,6 +9,7 @@ class ProviderCompetition:
     name: str
     country_code: str | None = None
     raw: dict[str, Any] | None = None
+    competition_type: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -98,17 +98,30 @@ class BrasileiraoCsvImporter:
             text("SELECT id FROM competitions WHERE name = :name ORDER BY id LIMIT 1"),
             {"name": name},
         ).scalar_one_or_none()
-        if existing:
-            return existing
         now = datetime.now(UTC)
+        if existing:
+            self.db.execute(
+                text(
+                    """
+                    UPDATE competitions
+                    SET competition_type = 'league',
+                        competition_type_source = 'curated:brasileirao-csv-import',
+                        updated_at = :now
+                    WHERE id = :id
+                    """
+                ),
+                {"id": existing, "now": now},
+            )
+            return existing
         return self.db.execute(
             text(
                 """
                 INSERT INTO competitions (
                     name, short_name, country_code, competition_type,
-                    is_active, created_at, updated_at
+                    competition_type_source, is_active, created_at, updated_at
                 ) VALUES (
-                    :name, 'Brasileirão', 'BRA', 'league', true, :now, :now
+                    :name, 'Brasileirão', 'BRA', 'league',
+                    'curated:brasileirao-csv-import', true, :now, :now
                 ) RETURNING id
                 """
             ),

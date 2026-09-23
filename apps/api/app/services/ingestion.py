@@ -273,10 +273,29 @@ class FootballIngestionService:
             },
         )
 
+    def _provider_competition_format(
+        self,
+        item: ProviderCompetition,
+    ) -> tuple[str, str | None]:
+        raw_type = (item.competition_type or "").strip()
+        if not raw_type:
+            return "unknown", None
+
+        normalized = self._normalize(raw_type)
+        if normalized in {"league", "leaguepoints", "roundrobin"}:
+            canonical = "league"
+        elif normalized in {"cup", "knockout", "playoff", "playoffs"}:
+            canonical = "cup"
+        else:
+            canonical = "unknown"
+
+        return canonical, f"provider:{self.provider.name}"
+
     def _upsert_competition(self, item: ProviderCompetition) -> tuple[int, bool]:
         now = datetime.now(UTC)
         internal_id = self._mapping("competition", item.external_id)
         created = False
+        competition_type, type_source = self._provider_competition_format(item)
 
         if internal_id is None:
             internal_id = self._reconcile_competition(item)
@@ -288,32 +307,63 @@ class FootballIngestionService:
                 text(
                     """
                     INSERT INTO competitions (
-                        name, country_code, competition_type, created_at, updated_at
+                        name, country_code, competition_type,
+                        competition_type_source, created_at, updated_at
                     )
-                    VALUES (:name, :country_code, 'league', :now, :now)
+                    VALUES (
+                        :name, :country_code, :competition_type,
+                        :competition_type_source, :now, :now
+                    )
                     RETURNING id
                     """
                 ),
-                {"name": item.name, "country_code": item.country_code, "now": now},
+                {
+                    "name": item.name,
+                    "country_code": item.country_code,
+                    "competition_type": competition_type,
+                    "competition_type_source": type_source,
+                    "now": now,
+                },
             ).scalar_one()
             self._save_mapping("competition", internal_id, item.external_id)
             created = True
         else:
-            self.db.execute(
-                text(
-                    """
-                    UPDATE competitions
-                    SET country_code = COALESCE(country_code, :country_code),
-                        updated_at = :now
-                    WHERE id = :internal_id
-                    """
-                ),
-                {
-                    "country_code": item.country_code,
-                    "now": now,
-                    "internal_id": internal_id,
-                },
-            )
+            if type_source is None:
+                self.db.execute(
+                    text(
+                        """
+                        UPDATE competitions
+                        SET country_code = COALESCE(country_code, :country_code),
+                            updated_at = :now
+                        WHERE id = :internal_id
+                        """
+                    ),
+                    {
+                        "country_code": item.country_code,
+                        "now": now,
+                        "internal_id": internal_id,
+                    },
+                )
+            else:
+                self.db.execute(
+                    text(
+                        """
+                        UPDATE competitions
+                        SET country_code = COALESCE(country_code, :country_code),
+                            competition_type = :competition_type,
+                            competition_type_source = :competition_type_source,
+                            updated_at = :now
+                        WHERE id = :internal_id
+                        """
+                    ),
+                    {
+                        "country_code": item.country_code,
+                        "competition_type": competition_type,
+                        "competition_type_source": type_source,
+                        "now": now,
+                        "internal_id": internal_id,
+                    },
+                )
 
         self._save_raw("competition", item.external_id, item.raw)
         return internal_id, created

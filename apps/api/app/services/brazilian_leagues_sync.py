@@ -140,22 +140,45 @@ class BrazilianLeaguesCatalogSync:
 
     def _ensure_competition(self, level: str, item: ProviderCompetition) -> int:
         mapped = self._mapping("competition", item.external_id)
-        if mapped is not None:
-            return mapped
         canonical = SERIES[level]
-        existing = self.db.execute(
-            text("SELECT id FROM competitions WHERE lower(name) = lower(:name) ORDER BY id LIMIT 1"),
-            {"name": canonical},
-        ).scalar_one_or_none()
+        existing = mapped
+        if existing is None:
+            existing = self.db.execute(
+                text(
+                    """
+                    SELECT id FROM competitions
+                    WHERE lower(name) = lower(:name)
+                    ORDER BY id LIMIT 1
+                    """
+                ),
+                {"name": canonical},
+            ).scalar_one_or_none()
+
         if existing is not None:
+            self.db.execute(
+                text(
+                    """
+                    UPDATE competitions
+                    SET competition_type = 'league',
+                        competition_type_source = 'curated:brazilian-leagues-sync',
+                        updated_at = now()
+                    WHERE id = :id
+                    """
+                ),
+                {"id": existing},
+            )
             return existing
+
         return self.db.execute(
             text(
                 """
                 INSERT INTO competitions (
-                    name, short_name, country_code, competition_type, is_active,
-                    created_at, updated_at
-                ) VALUES (:name, :short_name, 'BRA', 'league', true, now(), now())
+                    name, short_name, country_code, competition_type,
+                    competition_type_source, is_active, created_at, updated_at
+                ) VALUES (
+                    :name, :short_name, 'BRA', 'league',
+                    'curated:brazilian-leagues-sync', true, now(), now()
+                )
                 RETURNING id
                 """
             ),

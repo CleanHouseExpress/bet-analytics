@@ -55,10 +55,23 @@ class MatchContextClassifier:
         if analysis_type is not AnalysisType.PRE_MATCH:
             return self._blocked(match_id, MatchContextBlockReason.UNSUPPORTED_ANALYSIS_TYPE, as_of)
 
-        # V1 deliberately relies on the canonical explicit competition_type. It does
-        # not infer knockout/league semantics from names, rounds or team counts.
+        # V2 only trusts a competition format when its provenance is explicit.
+        # Legacy rows whose "league" value came from a generic default fail closed.
+        type_source = (competition.competition_type_source or "").strip()
+        if not type_source:
+            return self._blocked(
+                match_id,
+                MatchContextBlockReason.UNVERIFIED_COMPETITION_FORMAT,
+                as_of,
+            )
+
+        # Do not infer knockout/league semantics from names, rounds or team counts.
         if competition.competition_type.casefold() != "league":
-            return self._blocked(match_id, MatchContextBlockReason.UNSUPPORTED_COMPETITION_FORMAT, as_of)
+            return self._blocked(
+                match_id,
+                MatchContextBlockReason.UNSUPPORTED_COMPETITION_FORMAT,
+                as_of,
+            )
 
         as_of_utc = _utc(as_of)
         kickoff_utc = _utc(match.kickoff_at)
