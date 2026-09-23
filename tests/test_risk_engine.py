@@ -1,6 +1,8 @@
 from dataclasses import replace
 from datetime import UTC, datetime
 
+import logging
+
 import pytest
 
 from apps.api.app.domain.market_probability import Market
@@ -311,3 +313,41 @@ def test_value_semantic_identity_changes_with_bets6_input():
     )
     assert first.value_semantic_hash != second.value_semantic_hash
     assert first.semantic_hash != second.semantic_hash
+
+
+def test_success_log_contains_risk_decision_and_reason(caplog):
+    with caplog.at_level(logging.INFO):
+        result = RiskEngine().calculate(
+            value=value(),
+            bankroll_amount=500,
+            exposure_known=True,
+        )
+
+    record = next(
+        item
+        for item in caplog.records
+        if item.getMessage() == "risk_assessment_calculated"
+    )
+    assert record.match_id == result.match_id
+    assert record.market == result.market.value
+    assert record.risk_engine_version == result.risk_engine_version
+    assert record.risk_decision == result.risk_decision.value
+    assert record.reason == result.reason.value
+
+
+def test_blocked_log_contains_reason_code(caplog):
+    with caplog.at_level(logging.WARNING), pytest.raises(RiskEngineError) as exc:
+        RiskEngine().calculate(
+            value=value(),
+            bankroll_amount=0,
+        )
+
+    assert exc.value.reason is RiskReason.INVALID_BANKROLL
+    record = next(
+        item
+        for item in caplog.records
+        if item.getMessage() == "risk_assessment_blocked"
+    )
+    assert record.match_id == value().match_id
+    assert record.risk_engine_version == "risk-engine-v1"
+    assert record.reason == RiskReason.INVALID_BANKROLL.value
