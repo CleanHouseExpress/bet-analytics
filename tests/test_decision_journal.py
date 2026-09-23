@@ -198,20 +198,14 @@ def test_blocked_observability_event(caplog):
     assert record.reason == "VALUE_PROVENANCE_MISMATCH"
 
 
-@pytest.mark.parametrize(
-    ("odd", "expected_decision"),
-    [
-        (1.05, "NO_GO"),
-        (1.12, "OBSERVAR"),
-        (1.20, "GO_PROTEGIDO"),
-        (1.30, "GO"),
-        (1.50, "GO_FORTE"),
-    ],
-)
-def test_journal_records_value_decision_bands(odd, expected_decision):
-    entry, _ = _record(odd=odd)
-    assert entry.value_decision.value == expected_decision
-    if expected_decision in {"NO_GO", "OBSERVAR"}:
+@pytest.mark.parametrize("odd", [1.05, 1.12, 1.20, 1.30, 1.50])
+def test_journal_records_value_engine_decision_without_reclassification(odd):
+    entry, chain = _record(odd=odd)
+    _, _, _, value, risk = chain
+    assert entry.value_decision is value.decision
+    assert entry.risk_decision is risk.risk_decision
+    assert entry.stake_units == risk.final_stake_units
+    if value.decision.value in {"NO_GO", "OBSERVAR"}:
         assert entry.stake_units == 0
 
 
