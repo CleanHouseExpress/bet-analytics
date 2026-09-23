@@ -594,13 +594,29 @@ class BrasileiraoBacktestImporter:
             {"name": self.COMPETITION_NAME},
         ).scalar_one_or_none()
         if existing:
+            self.db.execute(
+                text(
+                    """
+                    UPDATE competitions
+                    SET competition_type = 'league',
+                        competition_type_source = 'curated:brasileirao-backtest-import',
+                        updated_at = now()
+                    WHERE id = :id
+                    """
+                ),
+                {"id": existing},
+            )
             return existing
         return self.db.execute(
             text(
                 """
                 INSERT INTO competitions (
-                    name, short_name, country_code, competition_type, is_active, created_at, updated_at
-                ) VALUES (:name, 'Brasileirão', 'BRA', 'league', true, now(), now())
+                    name, short_name, country_code, competition_type,
+                    competition_type_source, is_active, created_at, updated_at
+                ) VALUES (
+                    :name, 'Brasileirão', 'BRA', 'league',
+                    'curated:brasileirao-backtest-import', true, now(), now()
+                )
                 RETURNING id
                 """
             ),
