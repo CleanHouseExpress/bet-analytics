@@ -204,6 +204,7 @@ class RiskEngine:
             if (
                 not position.position_id.strip()
                 or not isinstance(position.market, Market)
+                or not isinstance(position.status, PositionStatus)
                 or not _finite(position.stake_units)
                 or position.stake_units < 0
             ):
@@ -236,7 +237,8 @@ class RiskEngine:
             )
 
         correlated = any(
-            frozenset((value.market, position.market)) in HIGH_CORRELATION
+            position.market is value.market
+            or frozenset((value.market, position.market)) in HIGH_CORRELATION
             for position in placed
         )
         opposing = any(
