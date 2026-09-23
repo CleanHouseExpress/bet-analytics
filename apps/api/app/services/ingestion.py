@@ -328,32 +328,42 @@ class FootballIngestionService:
             self._save_mapping("competition", internal_id, item.external_id)
             created = True
         else:
-            self.db.execute(
-                text(
-                    """
-                    UPDATE competitions
-                    SET country_code = COALESCE(country_code, :country_code),
-                        competition_type = CASE
-                            WHEN :competition_type_source IS NOT NULL
-                                THEN :competition_type
-                            ELSE competition_type
-                        END,
-                        competition_type_source = COALESCE(
-                            :competition_type_source,
-                            competition_type_source
-                        ),
-                        updated_at = :now
-                    WHERE id = :internal_id
-                    """
-                ),
-                {
-                    "country_code": item.country_code,
-                    "competition_type": competition_type,
-                    "competition_type_source": type_source,
-                    "now": now,
-                    "internal_id": internal_id,
-                },
-            )
+            if type_source is None:
+                self.db.execute(
+                    text(
+                        """
+                        UPDATE competitions
+                        SET country_code = COALESCE(country_code, :country_code),
+                            updated_at = :now
+                        WHERE id = :internal_id
+                        """
+                    ),
+                    {
+                        "country_code": item.country_code,
+                        "now": now,
+                        "internal_id": internal_id,
+                    },
+                )
+            else:
+                self.db.execute(
+                    text(
+                        """
+                        UPDATE competitions
+                        SET country_code = COALESCE(country_code, :country_code),
+                            competition_type = :competition_type,
+                            competition_type_source = :competition_type_source,
+                            updated_at = :now
+                        WHERE id = :internal_id
+                        """
+                    ),
+                    {
+                        "country_code": item.country_code,
+                        "competition_type": competition_type,
+                        "competition_type_source": type_source,
+                        "now": now,
+                        "internal_id": internal_id,
+                    },
+                )
 
         self._save_raw("competition", item.external_id, item.raw)
         return internal_id, created
