@@ -49,6 +49,14 @@ def _finite(value: object) -> bool:
     )
 
 
+def _stable_dataclass_payload(value: object) -> dict[str, object]:
+    if not is_dataclass(value):
+        raise TypeError("expected dataclass")
+    payload = asdict(value)
+    payload.pop("calculated_at", None)
+    return payload
+
+
 def _contains_non_finite(value: object) -> bool:
     if is_dataclass(value):
         return _contains_non_finite(asdict(value))
@@ -217,7 +225,7 @@ class DecisionJournal:
             raise DecisionJournalError("MARKET_PROBABILITY_PROVENANCE_MISMATCH")
         if value_assessment_semantic_hash(expected_value) != value_hash:
             raise DecisionJournalError("VALUE_PROVENANCE_MISMATCH")
-        if expected_risk.semantic_hash != risk.semantic_hash:
+        if _stable_dataclass_payload(expected_risk) != _stable_dataclass_payload(risk):
             raise DecisionJournalError("RISK_PROVENANCE_MISMATCH")
         if risk.value_semantic_hash != value_hash:
             raise DecisionJournalError("VALUE_PROVENANCE_MISMATCH")
