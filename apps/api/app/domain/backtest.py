@@ -9,9 +9,69 @@ from apps.api.app.domain.market_probability import Market
 from apps.api.app.domain.risk_assessment import RiskDecision
 from apps.api.app.domain.value_assessment import ValueDecision
 
-BACKTEST_VERSION = "walk-forward-motor-01-v1"
+BACKTEST_VERSION = "walk-forward-motor-01-v2"
 DEFAULT_BACKTEST_SEASONS = ("2024", "2025", "2026")
 DEFAULT_MIN_SAMPLE_FOR_REVIEW = 100
+
+
+@dataclass(frozen=True, slots=True)
+class SeasonCoverageManifest:
+    season: str
+    minimum_matches: int
+    expected_teams: int
+    minimum_matches_by_round: tuple[tuple[int, int], ...]
+    source: str
+    allow_additional_rounds: bool = False
+
+
+_FULL_SERIE_A_ROUNDS = tuple((round_number, 10) for round_number in range(1, 39))
+DEFAULT_BACKTEST_COVERAGE_MANIFEST = (
+    SeasonCoverageManifest(
+        season="2024",
+        minimum_matches=380,
+        expected_teams=20,
+        minimum_matches_by_round=_FULL_SERIE_A_ROUNDS,
+        source="docs/brasileirao_serie_a_2024_enriched_v2.csv",
+    ),
+    SeasonCoverageManifest(
+        season="2025",
+        minimum_matches=380,
+        expected_teams=20,
+        minimum_matches_by_round=_FULL_SERIE_A_ROUNDS,
+        source="docs/brasileirao_serie_a_2025_enriched_v6.csv",
+    ),
+    SeasonCoverageManifest(
+        season="2026",
+        minimum_matches=215,
+        expected_teams=20,
+        minimum_matches_by_round=(
+            (1, 10),
+            (2, 10),
+            (3, 10),
+            (4, 9),
+            (5, 10),
+            (6, 10),
+            (7, 10),
+            (8, 10),
+            (9, 10),
+            (10, 10),
+            (11, 10),
+            (12, 10),
+            (13, 10),
+            (14, 10),
+            (15, 10),
+            (16, 10),
+            (17, 10),
+            (18, 10),
+            (19, 10),
+            (20, 10),
+            (21, 6),
+            (22, 10),
+        ),
+        source="docs/brasileirao_serie_a_2026_enriched_v5.csv",
+        allow_additional_rounds=True,
+    ),
+)
 
 
 class BacktestEvaluationStatus(StrEnum):
@@ -37,6 +97,9 @@ class BacktestConfig:
     as_of_offset_seconds: int = 60
     min_sample_for_review: int = DEFAULT_MIN_SAMPLE_FOR_REVIEW
     thesis: str = "BETS-9-WALK-FORWARD-MOTOR-01"
+    coverage_manifest: tuple[SeasonCoverageManifest, ...] = (
+        DEFAULT_BACKTEST_COVERAGE_MANIFEST
+    )
 
 
 @dataclass(frozen=True, slots=True)
