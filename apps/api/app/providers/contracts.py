@@ -28,6 +28,7 @@ class ProviderTeam:
     name: str
     country_code: str | None = None
     raw: dict[str, Any] | None = None
+    aliases: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

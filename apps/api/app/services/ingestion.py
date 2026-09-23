@@ -15,6 +15,10 @@ from apps.api.app.providers.contracts import (
     ProviderSeason,
     ProviderTeam,
 )
+from apps.api.app.providers.team_aliases import (
+    PROVIDER_TEAM_ALIAS_CATALOG_VERSION,
+    canonical_names_for_provider_team,
+)
 from apps.api.app.services.match_reconciliation import (
     MatchCandidate,
     MatchReconciliationError,
@@ -90,6 +94,9 @@ class FootballIngestionService:
                 "fixture_date_from": fixture_date_from,
                 "fixture_date_to": fixture_date_to,
                 "strict_team_reconciliation": strict_team_reconciliation,
+                "provider_team_alias_catalog_version": (
+                    PROVIDER_TEAM_ALIAS_CATALOG_VERSION
+                ),
             },
         )
         self.db.commit()
@@ -450,19 +457,49 @@ class FootballIngestionService:
         now = datetime.now(UTC)
         internal_id = self._mapping("team", item.external_id)
         created = False
+        canonical_names = self._provider_team_canonical_names(item)
+        canonical_name = canonical_names[0] if canonical_names else None
+
+        if internal_id is not None and canonical_name is not None:
+            canonical_candidates = self._team_candidate_ids(canonical_name)
+            mapped_team_name = self.db.execute(
+                text("SELECT name FROM teams WHERE id = :id"),
+                {"id": internal_id},
+            ).scalar_one_or_none()
+            if mapped_team_name is None:
+                raise ValueError(
+                    "MAPPED_TEAM_NOT_FOUND:"
+                    f"provider={self.provider.name},external_id={item.external_id},"
+                    f"internal_id={internal_id}"
+                )
+            mapped_matches_catalog = (
+                internal_id in canonical_candidates
+                or self._normalize(mapped_team_name) == self._normalize(canonical_name)
+            )
+            if not mapped_matches_catalog:
+                raise ValueError(
+                    "MAPPED_TEAM_IDENTITY_CONFLICT:"
+                    f"provider={self.provider.name},external_id={item.external_id},"
+                    f"internal_id={internal_id},mapped_name={mapped_team_name},"
+                    f"canonical_name={canonical_name},"
+                    f"candidate_ids={sorted(canonical_candidates)}"
+                )
 
         if internal_id is None:
-            internal_id = self._reconcile_team(item.name)
+            internal_id = self._reconcile_provider_team(item, canonical_names)
             if internal_id is not None:
                 self._save_mapping("team", internal_id, item.external_id)
 
         if internal_id is None and strict_reconciliation:
             raise ValueError(
                 "Team reconciliation failed for provider team "
-                f"'{item.name}' ({item.external_id}). Add a canonical team alias or mapping first."
+                f"'{item.name}' ({item.external_id}). "
+                f"Alias catalog={PROVIDER_TEAM_ALIAS_CATALOG_VERSION}. "
+                "Add a versioned provider alias/mapping before syncing."
             )
 
         if internal_id is None:
+            creation_name = canonical_name or item.name
             internal_id = self.db.execute(
                 text(
                     """
@@ -473,10 +510,14 @@ class FootballIngestionService:
                     RETURNING id
                     """
                 ),
-                {"name": item.name, "country_code": item.country_code, "now": now},
+                {
+                    "name": creation_name,
+                    "country_code": item.country_code,
+                    "now": now,
+                },
             ).scalar_one()
             self._save_mapping("team", internal_id, item.external_id)
-            normalized = self._normalize(item.name)
+            normalized = self._normalize(creation_name)
             if normalized:
                 self.db.execute(
                     text(
@@ -488,7 +529,7 @@ class FootballIngestionService:
                     ),
                     {
                         "team_id": internal_id,
-                        "alias": item.name,
+                        "alias": creation_name,
                         "normalized_alias": normalized,
                     },
                 )
@@ -937,7 +978,24 @@ class FootballIngestionService:
             )
         return candidates[0] if candidates else None
 
-    def _reconcile_team(self, name: str) -> int | None:
+    def _provider_team_canonical_names(
+        self,
+        item: ProviderTeam,
+    ) -> tuple[str, ...]:
+        labels = tuple(
+            dict.fromkeys(
+                label.strip()
+                for label in (item.name, *item.aliases)
+                if label and label.strip()
+            )
+        )
+        return canonical_names_for_provider_team(
+            provider=self.provider.name,
+            external_id=item.external_id,
+            labels=labels,
+        )
+
+    def _team_candidate_ids(self, name: str) -> set[int]:
         target = self._normalize(name)
         candidates: set[int] = set()
 
@@ -951,6 +1009,39 @@ class FootballIngestionService:
             if self._normalize(row.alias) == target:
                 candidates.add(row.team_id)
 
+        return candidates
+
+    def _reconcile_provider_team(
+        self,
+        item: ProviderTeam,
+        canonical_names: tuple[str, ...] | None = None,
+    ) -> int | None:
+        canonical_names = (
+            canonical_names
+            if canonical_names is not None
+            else self._provider_team_canonical_names(item)
+        )
+        evidence = tuple(
+            dict.fromkeys(
+                label.strip()
+                for label in (item.name, *item.aliases, *canonical_names)
+                if label and label.strip()
+            )
+        )
+        candidates: set[int] = set()
+        for label in evidence:
+            candidates.update(self._team_candidate_ids(label))
+
+        if len(candidates) > 1:
+            raise ValueError(
+                "Ambiguous team reconciliation for provider team "
+                f"'{item.name}' ({item.external_id}); "
+                f"evidence={list(evidence)}, candidates={sorted(candidates)}"
+            )
+        return next(iter(candidates)) if candidates else None
+
+    def _reconcile_team(self, name: str) -> int | None:
+        candidates = self._team_candidate_ids(name)
         if len(candidates) > 1:
             raise ValueError(
                 f"Ambiguous team reconciliation for '{name}': {sorted(candidates)}"
