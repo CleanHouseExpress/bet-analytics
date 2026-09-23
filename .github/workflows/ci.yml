@@ -33,8 +33,12 @@ jobs:
         run: pip install -e ".[dev]"
       - name: Validate Compose PostgreSQL isolation
         run: |
-          docker compose up -d db
-          test -z "$(docker compose port db 5432)"
+          docker compose up -d --wait db
+          db_container="$(docker compose ps -q db)"
+          published_ports="$(
+            docker inspect "$db_container"               --format '{{range $port, $bindings := .NetworkSettings.Ports}}{{if $bindings}}{{$port}}={{json $bindings}}{{end}}{{end}}'
+          )"
+          test -z "$published_ports"
           docker compose exec -T db pg_isready -U bet_analytics -d bet_analytics
           docker compose build api
           docker compose run --rm api sh -c "alembic upgrade head && alembic current"
