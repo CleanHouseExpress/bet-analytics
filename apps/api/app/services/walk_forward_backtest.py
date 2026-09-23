@@ -767,7 +767,10 @@ class WalkForwardBacktest:
         )
 
         evaluations: list[BacktestEvaluation] = []
-        price_cutoff = kickoff_at - timedelta(seconds=config.as_of_offset_seconds)
+        # Prices must exist before the round-level decision cutoff too. Using
+        # a later pre-match price for a match played after other round fixtures
+        # would let same-round information influence the financial decision.
+        price_cutoff = round_as_of
         for market in config.markets:
             actual = _market_outcome(market, home_score, away_score)
             try:
@@ -962,15 +965,33 @@ class WalkForwardBacktest:
         ]
         if not candidates:
             return None
-        latest = max(_utc(row["captured_at"]) for row in candidates)
-        at_latest = [
-            row for row in candidates if _utc(row["captured_at"]) == latest
-        ]
-        best = max(at_latest, key=lambda row: (float(row["odd"]), str(row["bookmaker_name"])))
+        latest_by_bookmaker: dict[str, dict[str, object]] = {}
+        for row in candidates:
+            bookmaker = str(row["bookmaker_name"])
+            current = latest_by_bookmaker.get(bookmaker)
+            if current is None:
+                latest_by_bookmaker[bookmaker] = row
+                continue
+            observed_at = _utc(row["captured_at"])
+            current_at = _utc(current["captured_at"])
+            if observed_at > current_at or (
+                observed_at == current_at
+                and float(row["odd"]) > float(current["odd"])
+            ):
+                latest_by_bookmaker[bookmaker] = row
+
+        best = max(
+            latest_by_bookmaker.values(),
+            key=lambda row: (
+                float(row["odd"]),
+                _utc(row["captured_at"]),
+                str(row["bookmaker_name"]),
+            ),
+        )
         return (
             float(best["odd"]),
             str(best["bookmaker_name"]),
-            latest,
+            _utc(best["captured_at"]),
         )
 
     @staticmethod
