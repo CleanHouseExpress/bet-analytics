@@ -225,12 +225,12 @@ class DecisionJournal:
             raise DecisionJournalError("MARKET_PROBABILITY_PROVENANCE_MISMATCH")
         if value_assessment_semantic_hash(expected_value) != value_hash:
             raise DecisionJournalError("VALUE_PROVENANCE_MISMATCH")
-        if _stable_dataclass_payload(expected_risk) != _stable_dataclass_payload(risk):
-            raise DecisionJournalError("RISK_PROVENANCE_MISMATCH")
         if risk.value_semantic_hash != value_hash:
             raise DecisionJournalError("VALUE_PROVENANCE_MISMATCH")
         if risk.value_decision != value.decision:
             raise DecisionJournalError("VALUE_DECISION_MISMATCH")
+        if _stable_dataclass_payload(expected_risk) != _stable_dataclass_payload(risk):
+            raise DecisionJournalError("RISK_PROVENANCE_MISMATCH")
         semantic = {
             "match_id": risk.match_id,
             "as_of": risk.as_of.astimezone(UTC).isoformat(),
