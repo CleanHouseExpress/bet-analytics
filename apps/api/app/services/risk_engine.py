@@ -21,7 +21,11 @@ from apps.api.app.domain.value_assessment import (
     ValueDecision,
 )
 
-from apps.api.app.services.value_assessment_snapshot import semantic_hash as value_assessment_semantic_hash\n\nlogger = logging.getLogger(__name__)
+from apps.api.app.services.value_assessment_snapshot import (
+    semantic_hash as value_assessment_semantic_hash,
+)
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_UNIT_PERCENT = 0.01
 MAX_MATCH_EXPOSURE_UNITS = 3.0
