@@ -73,6 +73,9 @@ class SportmonksProvider(FootballDataProvider):
                 external_id=str(item["id"]),
                 name=item["name"],
                 country_code=(item.get("country") or {}).get("iso2"),
+                competition_type=(
+                    str(item["type"]) if item.get("type") is not None else None
+                ),
                 raw=item,
             )
             for item in leagues
