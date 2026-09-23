@@ -595,10 +595,11 @@ class FootballIngestionService:
                     m.id,
                     m.kickoff_at,
                     r.round_number,
-                    s.name AS stage_name
+                    COALESCE(match_stage.name, round_stage.name) AS stage_name
                 FROM matches m
                 LEFT JOIN rounds r ON r.id = m.round_id
-                LEFT JOIN stages s ON s.id = m.stage_id
+                LEFT JOIN stages match_stage ON match_stage.id = m.stage_id
+                LEFT JOIN stages round_stage ON round_stage.id = r.stage_id
                 WHERE m.season_id = :season_id
                   AND m.home_team_id = :home_team_id
                   AND m.away_team_id = :away_team_id
