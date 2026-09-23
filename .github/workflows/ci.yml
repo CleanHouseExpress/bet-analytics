@@ -31,6 +31,16 @@ jobs:
           python-version: "3.13"
       - name: Install dependencies
         run: pip install -e ".[dev]"
+      - name: Validate Compose PostgreSQL isolation
+        run: |
+          docker compose up -d db
+          test -z "$(docker compose port db 5432)"
+          docker compose exec -T db pg_isready -U bet_analytics -d bet_analytics
+          docker compose build api
+          docker compose run --rm api sh -c "alembic upgrade head && alembic current"
+      - name: Cleanup Compose validation
+        if: always()
+        run: docker compose down
       - name: Lint
         run: ruff check .
       - name: Run migrations
