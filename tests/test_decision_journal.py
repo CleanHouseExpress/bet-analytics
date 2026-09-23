@@ -152,6 +152,40 @@ def test_value_provenance_mismatch_fails_closed():
         )
 
 
+def test_value_must_come_from_supplied_market_probability():
+    features, poisson, probability, value, risk = _chain()
+    invalid_value = replace(value, p_model=value.p_model - 0.05)
+    with pytest.raises(DecisionJournalError, match="VALUE_PROVENANCE_MISMATCH"):
+        DecisionJournal().record(
+            features=features,
+            poisson=poisson,
+            probability=probability,
+            value=invalid_value,
+            risk=risk,
+            analysis_type=AnalysisType.PRE_MATCH,
+            match_type="LEAGUE",
+        )
+
+
+def test_tampered_risk_payload_with_preserved_hash_fails_closed():
+    features, poisson, probability, value, risk = _chain()
+    invalid_risk = replace(
+        risk,
+        final_stake_units=risk.final_stake_units + 0.5,
+        stake_amount=risk.stake_amount + 2.5,
+    )
+    with pytest.raises(DecisionJournalError, match="RISK_PROVENANCE_MISMATCH"):
+        DecisionJournal().record(
+            features=features,
+            poisson=poisson,
+            probability=probability,
+            value=value,
+            risk=invalid_risk,
+            analysis_type=AnalysisType.PRE_MATCH,
+            match_type="LEAGUE",
+        )
+
+
 def test_identity_mismatch_fails_closed():
     features, poisson, probability, value, risk = _chain()
     invalid_risk = replace(risk, match_id=risk.match_id + 1)
@@ -167,16 +201,12 @@ def test_identity_mismatch_fails_closed():
         )
 
 
-def test_recorded_observability_event(caplog):
+def test_build_does_not_emit_recorded_before_persistence(caplog):
     caplog.set_level(logging.INFO)
-    entry, _ = _record()
-    record = next(
-        item for item in caplog.records if item.message == "decision_journal_recorded"
+    _record()
+    assert not any(
+        item.message == "decision_journal_recorded" for item in caplog.records
     )
-    assert record.journal_hash == entry.semantic_hash
-    assert record.match_id == entry.match_id
-    assert record.market == entry.market.value
-    assert record.stake_units == entry.stake_units
 
 
 def test_blocked_observability_event(caplog):
@@ -246,6 +276,8 @@ def test_risk_semantic_change_creates_new_journal_entry():
         ("p_cons", float("inf"), "INVALID_NUMERIC_VALUE"),
         ("market_odd", float("nan"), "INVALID_NUMERIC_VALUE"),
         ("confidence", float("-inf"), "INVALID_NUMERIC_VALUE"),
+        ("fair_odds", float("nan"), "INVALID_NUMERIC_VALUE"),
+        ("odd_min", float("inf"), "INVALID_NUMERIC_VALUE"),
     ],
 )
 def test_invalid_numeric_value_fails_closed(field, value, reason):
