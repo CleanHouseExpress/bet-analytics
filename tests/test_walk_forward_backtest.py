@@ -10,6 +10,8 @@ from apps.api.app.domain.backtest import (
 )
 from apps.api.app.domain.decision_journal import SettlementResult
 from apps.api.app.domain.market_probability import Market
+from apps.api.app.domain.risk_assessment import RiskDecision
+from apps.api.app.domain.value_assessment import ValueDecision
 from apps.api.app.services.walk_forward_backtest import (
     BacktestDataError,
     WalkForwardBacktest,
@@ -42,8 +44,8 @@ def _evaluation(
         market_odd=1.5,
         odd_source="test",
         odd_observed_at=now,
-        value_decision=None,
-        risk_decision=None,
+        value_decision=ValueDecision.GO,
+        risk_decision=RiskDecision.FULL_STAKE,
         stake_units=1.0 if stake_value else 0.0,
         stake_value=stake_value,
         settlement_result=(
