@@ -412,6 +412,7 @@ class WalkForwardBacktest:
         self._validate_config(config)
         matches = self._load_matches(config)
         self._validate_match_set(matches)
+        self._validate_dataset_coverage(matches, config)
         found_seasons = {str(row["season"]) for row in matches}
         missing_seasons = set(config.seasons) - found_seasons
         if missing_seasons:
@@ -486,13 +487,14 @@ class WalkForwardBacktest:
                             (evaluation.settled_at, evaluation.profit_loss)
                         )
 
-        for settled_at, profit_loss in sorted(
+        bankroll, pending_cashflows = self._apply_pending_cashflows(
+            bankroll,
             pending_cashflows,
-            key=lambda item: item[0],
-        ):
-            _ = settled_at
-            bankroll += profit_loss
-            equity_curve.append(bankroll)
+            datetime.max.replace(tzinfo=UTC),
+            equity_curve,
+        )
+        if pending_cashflows:
+            raise BacktestDataError("UNSETTLED_BACKTEST_CASHFLOW")
 
         metrics = self._metrics(
             evaluations,
@@ -634,6 +636,74 @@ class WalkForwardBacktest:
                 if key in round_team:
                     raise BacktestDataError(f"DUPLICATE_TEAM_IN_ROUND:{key}")
                 round_team.add(key)
+
+    @staticmethod
+    def _validate_dataset_coverage(
+        matches: list[dict[str, object]],
+        config: BacktestConfig,
+    ) -> None:
+        manifests = {item.season: item for item in config.coverage_manifest}
+        if len(manifests) != len(config.coverage_manifest):
+            raise BacktestDataError("DUPLICATE_BACKTEST_COVERAGE_MANIFEST")
+
+        missing_manifests = set(config.seasons) - set(manifests)
+        if missing_manifests:
+            raise BacktestDataError(
+                "MISSING_TRUSTED_DATASET_MANIFEST:"
+                + ",".join(sorted(missing_manifests))
+            )
+
+        by_season: dict[str, list[dict[str, object]]] = defaultdict(list)
+        for row in matches:
+            by_season[str(row["season"])].append(row)
+
+        for season in config.seasons:
+            manifest = manifests[season]
+            season_rows = by_season.get(season, [])
+            if len(season_rows) < manifest.minimum_matches:
+                raise BacktestDataError(
+                    "INCOMPLETE_BACKTEST_SEASON:"
+                    f"season={season},matches={len(season_rows)},"
+                    f"expected_min={manifest.minimum_matches},source={manifest.source}"
+                )
+
+            teams = {
+                int(team_id)
+                for row in season_rows
+                for team_id in (row["home_team_id"], row["away_team_id"])
+            }
+            if len(teams) != manifest.expected_teams:
+                raise BacktestDataError(
+                    "UNEXPECTED_BACKTEST_TEAM_COUNT:"
+                    f"season={season},teams={len(teams)},"
+                    f"expected={manifest.expected_teams},source={manifest.source}"
+                )
+
+            round_counts: dict[int, int] = defaultdict(int)
+            for row in season_rows:
+                round_counts[int(row["round_number"])] += 1
+
+            expected_rounds = {
+                round_number
+                for round_number, _ in manifest.minimum_matches_by_round
+            }
+            if not manifest.allow_additional_rounds:
+                unexpected_rounds = set(round_counts) - expected_rounds
+                if unexpected_rounds:
+                    raise BacktestDataError(
+                        "UNEXPECTED_BACKTEST_ROUNDS:"
+                        f"season={season},rounds="
+                        + ",".join(str(value) for value in sorted(unexpected_rounds))
+                    )
+
+            for round_number, expected_min in manifest.minimum_matches_by_round:
+                actual = round_counts.get(round_number, 0)
+                if actual < expected_min:
+                    raise BacktestDataError(
+                        "INCOMPLETE_BACKTEST_ROUND:"
+                        f"season={season},round={round_number},matches={actual},"
+                        f"expected_min={expected_min},source={manifest.source}"
+                    )
 
     def _load_relevant_odds(
         self,
@@ -1126,13 +1196,22 @@ class WalkForwardBacktest:
         cutoff: datetime,
         equity_curve: list[float],
     ) -> tuple[float, list[tuple[datetime, float]]]:
+        cutoff_utc = _utc(cutoff)
+        due: dict[datetime, list[float]] = defaultdict(list)
         remaining: list[tuple[datetime, float]] = []
-        for settled_at, profit_loss in sorted(pending, key=lambda item: item[0]):
-            if settled_at <= cutoff:
-                bankroll += profit_loss
-                equity_curve.append(bankroll)
+
+        for settled_at, profit_loss in pending:
+            settled_at_utc = _utc(settled_at)
+            if settled_at_utc <= cutoff_utc:
+                due[settled_at_utc].append(float(profit_loss))
             else:
-                remaining.append((settled_at, profit_loss))
+                remaining.append((settled_at_utc, float(profit_loss)))
+
+        for settled_at in sorted(due):
+            bankroll += math.fsum(due[settled_at])
+            equity_curve.append(bankroll)
+
+        remaining.sort(key=lambda item: item[0])
         return bankroll, remaining
 
     @staticmethod
