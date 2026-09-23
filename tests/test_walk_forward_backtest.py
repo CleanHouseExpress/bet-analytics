@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
@@ -136,14 +137,12 @@ def test_minimum_sample_gate_prevents_small_sample_promotion():
 
 def test_predictive_metrics_include_missing_odd_but_financial_metrics_do_not():
     item = _evaluation(stake_value=0.0, profit_loss=0.0)
-    missing = BacktestEvaluation(
-        **{
-            **item.__dict__,
-            "status": BacktestEvaluationStatus.MISSING_ODD,
-            "market_odd": None,
-            "odd_source": None,
-            "odd_observed_at": None,
-        }
+    missing = replace(
+        item,
+        status=BacktestEvaluationStatus.MISSING_ODD,
+        market_odd=None,
+        odd_source=None,
+        odd_observed_at=None,
     )
     metrics = WalkForwardBacktest._metrics(
         [missing],
