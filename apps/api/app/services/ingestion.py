@@ -462,11 +462,26 @@ class FootballIngestionService:
 
         if internal_id is not None and canonical_name is not None:
             canonical_candidates = self._team_candidate_ids(canonical_name)
-            if canonical_candidates and internal_id not in canonical_candidates:
+            mapped_team_name = self.db.execute(
+                text("SELECT name FROM teams WHERE id = :id"),
+                {"id": internal_id},
+            ).scalar_one_or_none()
+            if mapped_team_name is None:
+                raise ValueError(
+                    "MAPPED_TEAM_NOT_FOUND:"
+                    f"provider={self.provider.name},external_id={item.external_id},"
+                    f"internal_id={internal_id}"
+                )
+            mapped_matches_catalog = (
+                internal_id in canonical_candidates
+                or self._normalize(mapped_team_name) == self._normalize(canonical_name)
+            )
+            if not mapped_matches_catalog:
                 raise ValueError(
                     "MAPPED_TEAM_IDENTITY_CONFLICT:"
                     f"provider={self.provider.name},external_id={item.external_id},"
-                    f"internal_id={internal_id},canonical_name={canonical_name},"
+                    f"internal_id={internal_id},mapped_name={mapped_team_name},"
+                    f"canonical_name={canonical_name},"
                     f"candidate_ids={sorted(canonical_candidates)}"
                 )
 
