@@ -1,10 +1,13 @@
 import json
+import logging
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import create_engine, text
 
+from apps.api.app.core.database import engine as postgres_engine
 from apps.api.app.domain.decision_journal import (
     AnalysisType,
     DecisionSettlement,
@@ -117,6 +120,58 @@ def test_persistence_is_idempotent_and_append_only():
     assert conn.execute(text("SELECT count(*) FROM decision_journal_entries")).scalar_one() == 1
     conn.close()
     engine.dispose()
+
+
+def test_persistence_emits_recorded_only_after_insert(caplog):
+    engine, conn = _setup()
+    entry = _entry()
+    caplog.set_level(logging.INFO)
+    persist_decision_journal_entry(conn, entry)
+    records = [
+        item for item in caplog.records
+        if item.message == "decision_journal_recorded"
+    ]
+    assert len(records) == 1
+    assert records[0].journal_hash == entry.semantic_hash
+    conn.close()
+    engine.dispose()
+
+
+def test_postgres_concurrent_idempotency():
+    entry = _entry()
+    with postgres_engine.begin() as conn:
+        conn.execute(
+            text("DELETE FROM decision_journal_entries WHERE semantic_hash=:hash"),
+            {"hash": entry.semantic_hash},
+        )
+
+    def persist_once():
+        with postgres_engine.begin() as conn:
+            return persist_decision_journal_entry(conn, entry)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        ids = list(pool.map(lambda _: persist_once(), range(2)))
+
+    try:
+        assert ids[0] == ids[1]
+        with postgres_engine.connect() as conn:
+            count = conn.execute(
+                text(
+                    "SELECT count(*) FROM decision_journal_entries "
+                    "WHERE semantic_hash=:hash"
+                ),
+                {"hash": entry.semantic_hash},
+            ).scalar_one()
+        assert count == 1
+    finally:
+        with postgres_engine.begin() as conn:
+            conn.execute(
+                text(
+                    "DELETE FROM decision_journal_entries "
+                    "WHERE semantic_hash=:hash"
+                ),
+                {"hash": entry.semantic_hash},
+            )
 
 
 def test_same_hash_divergent_payload_is_explicit_conflict():
