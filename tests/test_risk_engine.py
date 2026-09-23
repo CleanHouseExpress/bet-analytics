@@ -106,6 +106,31 @@ def test_non_placed_do_not_consume():
     assert result.final_stake_units == 1
 
 
+def test_string_status_fails_closed_before_exposure_filter():
+    invalid = pos(Market.BTTS_YES)
+    invalid = replace(invalid, status="PLACED")
+    with pytest.raises(RiskEngineError) as exc:
+        RiskEngine().calculate(
+            value=value(),
+            bankroll_amount=500,
+            positions=(invalid,),
+            exposure_known=True,
+        )
+    assert exc.value.reason is RiskReason.INVALID_POSITION
+
+
+def test_same_market_is_treated_as_high_correlation():
+    result = RiskEngine().calculate(
+        value=value(ValueDecision.GO, Market.TOTAL_GOALS_OVER_2_5),
+        bankroll_amount=500,
+        positions=(pos(Market.TOTAL_GOALS_OVER_2_5),),
+        exposure_known=True,
+        wallet_id="w1",
+    )
+    assert result.final_stake_units == 0.5
+    assert result.reason is RiskReason.HIGH_CORRELATION_EXPOSURE
+
+
 def test_unknown_exposure_warns_without_reducing():
     result = RiskEngine().calculate(value=value(), bankroll_amount=500)
     assert result.final_stake_units == 1
