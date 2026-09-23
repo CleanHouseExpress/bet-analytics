@@ -103,6 +103,11 @@ class BacktestEvaluation:
     market: Market
     status: BacktestEvaluationStatus
     p_model: float | None
+    p_cons: float | None
+    p_break_even: float | None
+    edge_pp: float | None
+    ev_cons: float | None
+    confidence: float | None
     baseline_probability: float | None
     actual_outcome: bool
     model_side: str | None
