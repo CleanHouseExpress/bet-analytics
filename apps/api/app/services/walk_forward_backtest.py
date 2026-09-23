@@ -62,6 +62,16 @@ logger = logging.getLogger(__name__)
 
 SAO_PAULO = ZoneInfo("America/Sao_Paulo")
 BACKTEST_CONTEXT_VERSION = f"{CLASSIFIER_VERSION}-event-time-backtest-v1"
+SUPPORTED_BACKTEST_MARKETS = frozenset(
+    {
+        Market.TOTAL_GOALS_OVER_1_5,
+        Market.TOTAL_GOALS_OVER_2_5,
+        Market.TOTAL_GOALS_UNDER_3_5,
+        Market.TOTAL_GOALS_UNDER_4_5,
+        Market.BTTS_YES,
+        Market.BTTS_NO,
+    }
+)
 GO_DECISIONS = frozenset(
     {
         ValueDecision.GO_CONDICIONAL,
@@ -402,6 +412,16 @@ class WalkForwardBacktest:
         self._validate_config(config)
         matches = self._load_matches(config)
         self._validate_match_set(matches)
+        found_seasons = {str(row["season"]) for row in matches}
+        missing_seasons = set(config.seasons) - found_seasons
+        if missing_seasons:
+            raise BacktestDataError(
+                "MISSING_BACKTEST_SEASONS:"
+                + ",".join(sorted(missing_seasons))
+            )
+        competition_ids = {int(row["competition_id"]) for row in matches}
+        if len(competition_ids) != 1:
+            raise BacktestDataError("AMBIGUOUS_BACKTEST_COMPETITION")
         relevant_odds = self._load_relevant_odds(matches, config.markets)
         data_fingerprint = self._data_fingerprint(matches, relevant_odds, config)
 
@@ -541,6 +561,8 @@ class WalkForwardBacktest:
             raise BacktestDataError("DUPLICATE_BACKTEST_SEASON")
         if len(set(config.markets)) != len(config.markets):
             raise BacktestDataError("DUPLICATE_BACKTEST_MARKET")
+        if not set(config.markets).issubset(SUPPORTED_BACKTEST_MARKETS):
+            raise BacktestDataError("UNSUPPORTED_BACKTEST_MARKET")
 
     def _load_matches(self, config: BacktestConfig) -> list[dict[str, object]]:
         rows = self.session.execute(
