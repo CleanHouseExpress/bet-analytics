@@ -14,6 +14,7 @@ class MatchReconciliationReason(StrEnum):
     EXACT_KICKOFF = "EXACT_KICKOFF"
     UNIQUE_ROUND = "UNIQUE_ROUND"
     UNIQUE_STAGE = "UNIQUE_STAGE"
+    UNIQUE_ROUND_STAGE = "UNIQUE_ROUND_STAGE"
     NEAREST_KICKOFF = "NEAREST_KICKOFF"
     UNIQUE_PAIR = "UNIQUE_PAIR"
     AMBIGUOUS = "AMBIGUOUS"
@@ -112,41 +113,78 @@ def resolve_match_candidate(
             candidate_ids=tuple(candidate.match_id for candidate in exact_kickoff),
         )
 
-    pool = candidates
-    if round_number is not None:
-        same_round = tuple(
-            candidate
-            for candidate in pool
-            if candidate.round_number == round_number
-        )
-        if len(same_round) == 1:
-            return MatchReconciliation(
-                match_id=same_round[0].match_id,
-                reason=MatchReconciliationReason.UNIQUE_ROUND,
-                candidate_ids=candidate_ids,
-            )
-        if same_round:
-            pool = same_round
-
     normalized_stage = _normalize(stage_name)
-    if normalized_stage is not None:
-        same_stage = tuple(
-            candidate
-            for candidate in pool
-            if _normalize(candidate.stage_name) == normalized_stage
+    compatible: list[MatchCandidate] = []
+    structural_scores: dict[int, tuple[int, bool, bool]] = {}
+    for candidate in candidates:
+        candidate_stage = _normalize(candidate.stage_name)
+        round_conflict = (
+            round_number is not None
+            and candidate.round_number is not None
+            and candidate.round_number != round_number
         )
-        if len(same_stage) == 1:
+        stage_conflict = (
+            normalized_stage is not None
+            and candidate_stage is not None
+            and candidate_stage != normalized_stage
+        )
+        if round_conflict or stage_conflict:
+            continue
+
+        round_match = (
+            round_number is not None
+            and candidate.round_number is not None
+            and candidate.round_number == round_number
+        )
+        stage_match = (
+            normalized_stage is not None
+            and candidate_stage is not None
+            and candidate_stage == normalized_stage
+        )
+        compatible.append(candidate)
+        structural_scores[candidate.match_id] = (
+            int(round_match) + int(stage_match),
+            round_match,
+            stage_match,
+        )
+
+    if not compatible:
+        reason = (
+            MatchReconciliationReason.CONFLICTING_SINGLE_CANDIDATE
+            if len(candidates) == 1
+            else MatchReconciliationReason.AMBIGUOUS
+        )
+        raise MatchReconciliationError(reason, candidate_ids=candidate_ids)
+
+    max_structural_score = max(
+        structural_scores[candidate.match_id][0]
+        for candidate in compatible
+    )
+    if max_structural_score > 0:
+        structural = tuple(
+            candidate
+            for candidate in compatible
+            if structural_scores[candidate.match_id][0] == max_structural_score
+        )
+        if len(structural) == 1:
+            candidate = structural[0]
+            _, round_match, stage_match = structural_scores[candidate.match_id]
+            if round_match and stage_match:
+                reason = MatchReconciliationReason.UNIQUE_ROUND_STAGE
+            elif round_match:
+                reason = MatchReconciliationReason.UNIQUE_ROUND
+            else:
+                reason = MatchReconciliationReason.UNIQUE_STAGE
             return MatchReconciliation(
-                match_id=same_stage[0].match_id,
-                reason=MatchReconciliationReason.UNIQUE_STAGE,
+                match_id=candidate.match_id,
+                reason=reason,
                 candidate_ids=candidate_ids,
             )
-        if same_stage:
-            pool = same_stage
+        compatible = list(structural)
 
     close = tuple(
         candidate
-        for candidate in pool
+        for candidate in compatible
         if _distance_seconds(candidate, kickoff_at) <= tolerance.total_seconds()
     )
     if len(close) == 1:
@@ -161,26 +199,9 @@ def resolve_match_candidate(
             candidate_ids=tuple(candidate.match_id for candidate in close),
         )
 
-    if len(candidates) == 1:
-        candidate = candidates[0]
-        round_conflict = (
-            round_number is not None
-            and candidate.round_number is not None
-            and candidate.round_number != round_number
-        )
-        candidate_stage = _normalize(candidate.stage_name)
-        stage_conflict = (
-            normalized_stage is not None
-            and candidate_stage is not None
-            and candidate_stage != normalized_stage
-        )
-        if round_conflict or stage_conflict:
-            raise MatchReconciliationError(
-                MatchReconciliationReason.CONFLICTING_SINGLE_CANDIDATE,
-                candidate_ids=candidate_ids,
-            )
+    if len(candidates) == 1 and len(compatible) == 1:
         return MatchReconciliation(
-            match_id=candidate.match_id,
+            match_id=compatible[0].match_id,
             reason=MatchReconciliationReason.UNIQUE_PAIR,
             candidate_ids=candidate_ids,
         )
