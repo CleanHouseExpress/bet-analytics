@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 import unicodedata
 from dataclasses import dataclass
@@ -14,6 +15,13 @@ from apps.api.app.providers.contracts import (
     ProviderSeason,
     ProviderTeam,
 )
+from apps.api.app.services.match_reconciliation import (
+    MatchCandidate,
+    MatchReconciliationError,
+    resolve_match_candidate,
+)
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -141,13 +149,22 @@ class FootballIngestionService:
                             f"Fixture {fixture.external_id} references teams not returned for season"
                         )
 
+                    stage_id = None
+                    if fixture.stage:
+                        stage_id = self._upsert_stage(season_id, fixture.stage)
+
                     round_id = None
                     if fixture.round_number is not None:
-                        round_id = self._upsert_round(season_id, fixture.round_number)
+                        round_id = self._upsert_round(
+                            season_id,
+                            fixture.round_number,
+                            stage_id=stage_id,
+                        )
 
                     _, created = self._upsert_match(
                         competition_id=competition_id,
                         season_id=season_id,
+                        stage_id=stage_id,
                         round_id=round_id,
                         home_team_id=home_team_id,
                         away_team_id=away_team_id,
@@ -446,71 +463,324 @@ class FootballIngestionService:
         self._save_raw("team", item.external_id, item.raw)
         return internal_id, created
 
-    def _upsert_round(self, season_id: int, round_number: int) -> int:
-        existing = self.db.execute(
-            text(
-                """
-                SELECT id
-                FROM rounds
-                WHERE season_id = :season_id
-                  AND round_number = :round_number
-                ORDER BY id
-                LIMIT 1
-                """
-            ),
-            {"season_id": season_id, "round_number": round_number},
-        ).scalar_one_or_none()
-        if existing is not None:
-            return existing
+    def _upsert_stage(self, season_id: int, stage_name: str) -> int:
+        name = stage_name.strip()
+        if not name:
+            raise ValueError("Fixture stage cannot be blank")
+
+        target = self._normalize(name)
+        candidates = [
+            row.id
+            for row in self.db.execute(
+                text(
+                    """
+                    SELECT id, name
+                    FROM stages
+                    WHERE season_id = :season_id
+                    ORDER BY id
+                    """
+                ),
+                {"season_id": season_id},
+            ).all()
+            if self._normalize(row.name) == target
+        ]
+        if len(candidates) > 1:
+            raise ValueError(
+                f"Ambiguous stage reconciliation for '{name}': {candidates}"
+            )
+        if candidates:
+            return candidates[0]
 
         return self.db.execute(
             text(
                 """
-                INSERT INTO rounds (season_id, name, round_number)
-                VALUES (:season_id, :name, :round_number)
+                INSERT INTO stages (
+                    season_id, name, stage_type, sort_order
+                )
+                VALUES (:season_id, :name, NULL, 0)
+                RETURNING id
+                """
+            ),
+            {"season_id": season_id, "name": name},
+        ).scalar_one()
+
+    def _upsert_round(
+        self,
+        season_id: int,
+        round_number: int,
+        *,
+        stage_id: int | None = None,
+    ) -> int:
+        candidates = self.db.execute(
+            text(
+                """
+                SELECT id, stage_id
+                FROM rounds
+                WHERE season_id = :season_id
+                  AND round_number = :round_number
+                ORDER BY id
+                """
+            ),
+            {"season_id": season_id, "round_number": round_number},
+        ).all()
+
+        if stage_id is not None:
+            same_stage = [row.id for row in candidates if row.stage_id == stage_id]
+            if len(same_stage) > 1:
+                raise ValueError(
+                    "Ambiguous round reconciliation for "
+                    f"season={season_id}, round={round_number}, stage={stage_id}: "
+                    f"{same_stage}"
+                )
+            if same_stage:
+                return same_stage[0]
+
+            stage_unknown = [row.id for row in candidates if row.stage_id is None]
+            if len(stage_unknown) == 1:
+                self.db.execute(
+                    text(
+                        """
+                        UPDATE rounds
+                        SET stage_id = :stage_id
+                        WHERE id = :round_id
+                        """
+                    ),
+                    {"stage_id": stage_id, "round_id": stage_unknown[0]},
+                )
+                return stage_unknown[0]
+            if len(stage_unknown) > 1:
+                raise ValueError(
+                    "Ambiguous round reconciliation for "
+                    f"season={season_id}, round={round_number}: {stage_unknown}"
+                )
+        else:
+            if len(candidates) == 1:
+                return candidates[0].id
+            if len(candidates) > 1:
+                raise ValueError(
+                    "Ambiguous round reconciliation for "
+                    f"season={season_id}, round={round_number}: "
+                    f"{[row.id for row in candidates]}"
+                )
+
+        return self.db.execute(
+            text(
+                """
+                INSERT INTO rounds (
+                    season_id, stage_id, name, round_number
+                )
+                VALUES (:season_id, :stage_id, :name, :round_number)
                 RETURNING id
                 """
             ),
             {
                 "season_id": season_id,
+                "stage_id": stage_id,
                 "name": f"Rodada {round_number}",
                 "round_number": round_number,
             },
         ).scalar_one()
 
+    def _match_candidates(
+        self,
+        *,
+        season_id: int,
+        home_team_id: int,
+        away_team_id: int,
+    ) -> tuple[MatchCandidate, ...]:
+        rows = self.db.execute(
+            text(
+                """
+                SELECT
+                    m.id,
+                    m.kickoff_at,
+                    r.round_number,
+                    COALESCE(match_stage.name, round_stage.name) AS stage_name
+                FROM matches m
+                LEFT JOIN rounds r ON r.id = m.round_id
+                LEFT JOIN stages match_stage ON match_stage.id = m.stage_id
+                LEFT JOIN stages round_stage ON round_stage.id = r.stage_id
+                WHERE m.season_id = :season_id
+                  AND m.home_team_id = :home_team_id
+                  AND m.away_team_id = :away_team_id
+                ORDER BY m.kickoff_at, m.id
+                """
+            ),
+            {
+                "season_id": season_id,
+                "home_team_id": home_team_id,
+                "away_team_id": away_team_id,
+            },
+        ).all()
+        return tuple(
+            MatchCandidate(
+                match_id=int(row.id),
+                kickoff_at=row.kickoff_at,
+                round_number=row.round_number,
+                stage_name=row.stage_name,
+            )
+            for row in rows
+        )
+
+    def _validate_mapped_match_identity(
+        self,
+        *,
+        internal_id: int,
+        competition_id: int,
+        season_id: int,
+        home_team_id: int,
+        away_team_id: int,
+        fixture_external_id: str,
+    ) -> None:
+        row = self.db.execute(
+            text(
+                """
+                SELECT competition_id, season_id, home_team_id, away_team_id
+                FROM matches
+                WHERE id = :internal_id
+                """
+            ),
+            {"internal_id": internal_id},
+        ).one_or_none()
+        if row is None:
+            raise ValueError(
+                "STALE_MATCH_MAPPING:"
+                f"provider={self.provider.name}, external_id={fixture_external_id}, "
+                f"internal_id={internal_id}"
+            )
+        expected = (
+            competition_id,
+            season_id,
+            home_team_id,
+            away_team_id,
+        )
+        current = (
+            row.competition_id,
+            row.season_id,
+            row.home_team_id,
+            row.away_team_id,
+        )
+        if current != expected:
+            raise ValueError(
+                "MAPPED_MATCH_IDENTITY_CONFLICT:"
+                f"provider={self.provider.name}, external_id={fixture_external_id}, "
+                f"internal_id={internal_id}, current={current}, expected={expected}"
+            )
+
+    def _ensure_match_mapping_available(
+        self,
+        *,
+        internal_id: int,
+        external_id: str,
+    ) -> None:
+        existing_external_id = self.db.execute(
+            text(
+                """
+                SELECT external_id
+                FROM external_entity_mappings
+                WHERE provider = :provider
+                  AND entity_type = 'match'
+                  AND internal_id = :internal_id
+                """
+            ),
+            {
+                "provider": self.provider.name,
+                "internal_id": internal_id,
+            },
+        ).scalar_one_or_none()
+        if (
+            existing_external_id is not None
+            and existing_external_id != external_id
+        ):
+            raise ValueError(
+                "MATCH_ALREADY_MAPPED_FOR_PROVIDER:"
+                f"provider={self.provider.name}, internal_id={internal_id}, "
+                f"existing_external_id={existing_external_id}, "
+                f"incoming_external_id={external_id}"
+            )
+
     def _upsert_match(
         self,
         competition_id: int,
         season_id: int,
+        stage_id: int | None,
         round_id: int | None,
         home_team_id: int,
         away_team_id: int,
         fixture: ProviderFixture,
     ) -> tuple[int, bool]:
+        if (
+            fixture.kickoff_at.tzinfo is None
+            or fixture.kickoff_at.utcoffset() is None
+        ):
+            raise ValueError("Fixture kickoff_at must be timezone-aware")
+
         now = datetime.now(UTC)
         internal_id = self._mapping("match", fixture.external_id)
         created = False
 
-        if internal_id is None:
-            candidates = self.db.execute(
-                text(
-                    """
-                    SELECT id
-                    FROM matches
-                    WHERE season_id = :season_id
-                      AND home_team_id = :home_team_id
-                      AND away_team_id = :away_team_id
-                    ORDER BY id
-                    """
-                ),
-                {
+        if internal_id is not None:
+            self._validate_mapped_match_identity(
+                internal_id=internal_id,
+                competition_id=competition_id,
+                season_id=season_id,
+                home_team_id=home_team_id,
+                away_team_id=away_team_id,
+                fixture_external_id=fixture.external_id,
+            )
+        else:
+            candidates = self._match_candidates(
+                season_id=season_id,
+                home_team_id=home_team_id,
+                away_team_id=away_team_id,
+            )
+            try:
+                resolution = resolve_match_candidate(
+                    candidates=candidates,
+                    kickoff_at=fixture.kickoff_at,
+                    round_number=fixture.round_number,
+                    stage_name=fixture.stage,
+                )
+            except MatchReconciliationError as exc:
+                logger.warning(
+                    "match_reconciliation_blocked",
+                    extra={
+                        "provider": self.provider.name,
+                        "external_id": fixture.external_id,
+                        "season_id": season_id,
+                        "home_team_id": home_team_id,
+                        "away_team_id": away_team_id,
+                        "kickoff_at": fixture.kickoff_at.isoformat(),
+                        "round_number": fixture.round_number,
+                        "stage": fixture.stage,
+                        "candidate_ids": list(exc.candidate_ids),
+                        "reason": exc.reason.value,
+                    },
+                )
+                raise
+
+            internal_id = resolution.match_id
+            logger.info(
+                "match_reconciliation_resolved",
+                extra={
+                    "provider": self.provider.name,
+                    "external_id": fixture.external_id,
                     "season_id": season_id,
                     "home_team_id": home_team_id,
                     "away_team_id": away_team_id,
+                    "kickoff_at": fixture.kickoff_at.isoformat(),
+                    "round_number": fixture.round_number,
+                    "stage": fixture.stage,
+                    "candidate_ids": list(resolution.candidate_ids),
+                    "match_id": internal_id,
+                    "reason": resolution.reason.value,
                 },
-            ).scalars().all()
-            if len(candidates) == 1:
-                internal_id = candidates[0]
+            )
+            if internal_id is not None:
+                self._ensure_match_mapping_available(
+                    internal_id=internal_id,
+                    external_id=fixture.external_id,
+                )
                 self._save_mapping("match", internal_id, fixture.external_id)
 
         if internal_id is None:
@@ -518,14 +788,14 @@ class FootballIngestionService:
                 text(
                     """
                     INSERT INTO matches (
-                        competition_id, season_id, round_id,
+                        competition_id, season_id, stage_id, round_id,
                         home_team_id, away_team_id,
                         kickoff_at, status, home_score, away_score,
                         provider_updated_at, last_synced_at,
                         created_at, updated_at
                     )
                     VALUES (
-                        :competition_id, :season_id, :round_id,
+                        :competition_id, :season_id, :stage_id, :round_id,
                         :home_team_id, :away_team_id,
                         :kickoff_at, :status, :home_score, :away_score,
                         :provider_updated_at, :last_synced_at,
@@ -537,6 +807,7 @@ class FootballIngestionService:
                 {
                     "competition_id": competition_id,
                     "season_id": season_id,
+                    "stage_id": stage_id,
                     "round_id": round_id,
                     "home_team_id": home_team_id,
                     "away_team_id": away_team_id,
@@ -558,6 +829,7 @@ class FootballIngestionService:
                     UPDATE matches
                     SET competition_id = :competition_id,
                         season_id = :season_id,
+                        stage_id = COALESCE(:stage_id, stage_id),
                         round_id = COALESCE(:round_id, round_id),
                         home_team_id = :home_team_id,
                         away_team_id = :away_team_id,
@@ -565,7 +837,10 @@ class FootballIngestionService:
                         status = :status,
                         home_score = COALESCE(:home_score, home_score),
                         away_score = COALESCE(:away_score, away_score),
-                        provider_updated_at = COALESCE(:provider_updated_at, provider_updated_at),
+                        provider_updated_at = COALESCE(
+                            :provider_updated_at,
+                            provider_updated_at
+                        ),
                         last_synced_at = :last_synced_at,
                         updated_at = :now
                     WHERE id = :internal_id
@@ -574,6 +849,7 @@ class FootballIngestionService:
                 {
                     "competition_id": competition_id,
                     "season_id": season_id,
+                    "stage_id": stage_id,
                     "round_id": round_id,
                     "home_team_id": home_team_id,
                     "away_team_id": away_team_id,
