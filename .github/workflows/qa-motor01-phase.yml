@@ -1,0 +1,93 @@
+name: QA Motor 01 Phase Acceptance
+
+on:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: qa-motor01-phase-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  historical-acceptance:
+    if: github.head_ref == 'qa/motor01-phase-acceptance'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start isolated PostgreSQL
+        run: docker compose up -d --wait db
+
+      - name: Build API image
+        run: docker compose build api
+
+      - name: Run migrations
+        run: docker compose run --rm --no-deps api alembic upgrade head
+
+      - name: Run Motor 01 phase acceptance on real Brasileirão data
+        run: docker compose run --rm --no-deps api python scripts/qa_motor01_phase.py
+
+      - name: Run focused fail-closed and integration regressions
+        run: |
+          docker compose run --rm --no-deps api pytest -q             tests/test_match_context.py             tests/test_match_context_review_findings.py             tests/test_feature_engine_integration.py             tests/test_poisson_integration.py             tests/test_value_engine_qa.py             tests/test_risk_engine_integration.py             tests/test_decision_journal_snapshot.py             tests/test_walk_forward_backtest_integration.py             tests/test_match_reconciliation.py             tests/test_match_reconciliation_ingestion.py             tests/test_provider_team_aliases.py             tests/test_future_fixture_sync.py
+
+      - name: Cleanup isolated QA database
+        if: always()
+        run: docker compose down -v --remove-orphans
+
+  provider-sync-acceptance:
+    if: github.head_ref == 'qa/motor01-phase-acceptance'
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 20
+    env:
+      FOOTBALL_DATA_API_TOKEN: ${{ secrets.FOOTBALL_DATA_API_TOKEN }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate provider secret
+        run: |
+          test -n "${FOOTBALL_DATA_API_TOKEN}"
+
+      - name: Clean stale project containers without deleting data
+        run: docker compose down --remove-orphans || true
+
+      - name: Start PostgreSQL
+        run: docker compose up -d --wait db
+
+      - name: Build API image
+        run: docker compose build api
+
+      - name: Run migrations
+        run: docker compose run --rm --no-deps api alembic upgrade head
+
+      - name: Sync real future fixtures in strict reconciliation mode
+        run: |
+          docker compose run --rm --no-deps             -e FOOTBALL_DATA_API_TOKEN="${FOOTBALL_DATA_API_TOKEN}"             api python scripts/sync_future_fixtures.py --days-back 2 --days-ahead 45
+
+      - name: Validate latest provider sync audit
+        run: |
+          docker compose exec -T db psql -U bet_analytics -d bet_analytics -v ON_ERROR_STOP=1 <<'SQL'
+          SELECT id,
+                 provider,
+                 resource,
+                 status,
+                 metadata->>'provider_team_alias_catalog_version' AS alias_catalog_version,
+                 records_received,
+                 records_created,
+                 records_updated,
+                 error
+          FROM provider_sync_runs
+          ORDER BY id DESC
+          LIMIT 1;
+
+          SELECT count(*) AS future_window_matches
+          FROM matches
+          WHERE kickoff_at::date BETWEEN CURRENT_DATE - 2 AND CURRENT_DATE + 45;
+          SQL
+
+      - name: Show service status
+        if: always()
+        run: docker compose ps
