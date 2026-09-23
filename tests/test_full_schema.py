@@ -35,6 +35,8 @@ EXPECTED_TABLES = {
     "external_entity_mappings",
     "provider_sync_runs",
     "provider_sync_cursors",
+    "backtest_runs",
+    "backtest_evaluations",
 }
 
 
