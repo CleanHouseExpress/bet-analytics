@@ -69,6 +69,9 @@ class FootballDataOrgProvider(FootballDataProvider):
                 external_id=str(item["id"]),
                 name=str(item["name"]),
                 country_code=(item.get("area") or {}).get("code"),
+                competition_type=(
+                    str(item["type"]) if item.get("type") is not None else None
+                ),
                 raw=item,
             )
             for item in competitions
