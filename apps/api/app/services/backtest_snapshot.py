@@ -172,8 +172,9 @@ def _persist_evaluation(
     sql = """
         INSERT INTO backtest_evaluations (
             run_id, match_id, season, round_number, kickoff_at, as_of,
-            market, status, p_model, baseline_probability, actual_outcome,
-            model_side, market_odd, odd_source, odd_observed_at,
+            market, status, p_model, p_cons, p_break_even, edge_pp, ev_cons,
+            confidence, baseline_probability, actual_outcome, model_side,
+            market_odd, odd_source, odd_observed_at,
             value_decision, risk_decision, stake_units, stake_value,
             settlement_result, settled_at, profit_loss, journal_entry_id,
             feature_semantic_hash, poisson_semantic_hash,
@@ -181,7 +182,8 @@ def _persist_evaluation(
             risk_semantic_hash, feature_payload, block_reason, payload
         ) VALUES (
             :run_id, :match_id, :season, :round_number, :kickoff_at, :as_of,
-            :market, :status, :p_model, :baseline_probability, :actual_outcome,
+            :market, :status, :p_model, :p_cons, :p_break_even, :edge_pp,
+            :ev_cons, :confidence, :baseline_probability, :actual_outcome,
             :model_side, :market_odd, :odd_source, :odd_observed_at,
             :value_decision, :risk_decision, :stake_units, :stake_value,
             :settlement_result, :settled_at, :profit_loss, :journal_entry_id,
@@ -217,6 +219,11 @@ def _persist_evaluation(
             "market": evaluation.market.value,
             "status": evaluation.status.value,
             "p_model": evaluation.p_model,
+            "p_cons": evaluation.p_cons,
+            "p_break_even": evaluation.p_break_even,
+            "edge_pp": evaluation.edge_pp,
+            "ev_cons": evaluation.ev_cons,
+            "confidence": evaluation.confidence,
             "baseline_probability": evaluation.baseline_probability,
             "actual_outcome": evaluation.actual_outcome,
             "model_side": evaluation.model_side,
