@@ -94,6 +94,9 @@ class FootballIngestionService:
                 "fixture_date_from": fixture_date_from,
                 "fixture_date_to": fixture_date_to,
                 "strict_team_reconciliation": strict_team_reconciliation,
+                "provider_team_alias_catalog_version": (
+                    PROVIDER_TEAM_ALIAS_CATALOG_VERSION
+                ),
             },
         )
         self.db.commit()
