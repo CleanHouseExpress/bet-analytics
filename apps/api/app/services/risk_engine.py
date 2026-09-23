@@ -301,7 +301,8 @@ class RiskEngine:
         exposure_hash: str,
         placed: list[OpenPosition],
     ) -> RiskAssessment:
-        value_hash = value_assessment_semantic_hash(value)\n        semantic = {
+        value_hash = value_assessment_semantic_hash(value)
+        semantic = {
             "match_id": value.match_id,
             "as_of": value.as_of.astimezone(UTC).isoformat(),
             "market": value.market.value,
