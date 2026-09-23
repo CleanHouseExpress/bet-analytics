@@ -1,5 +1,5 @@
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -103,6 +103,45 @@ def test_generic_total_and_btts_odds_mapping():
     )
     assert _odds_row_matches_market(btts, Market.BTTS_YES)
     assert not _odds_row_matches_market(btts, Market.BTTS_NO)
+
+
+def test_price_selection_uses_latest_per_bookmaker_before_round_cutoff():
+    cutoff = datetime(2026, 1, 1, 20, tzinfo=UTC)
+    rows = (
+        {
+            "market_code": "TOTAL_GOALS_OVER_1_5",
+            "market_name": "Total Goals Over 1.5",
+            "selection": "over",
+            "line": 1.5,
+            "odd": 1.70,
+            "bookmaker_name": "Book A",
+            "captured_at": cutoff - timedelta(minutes=10),
+        },
+        {
+            "market_code": "TOTAL_GOALS_OVER_1_5",
+            "market_name": "Total Goals Over 1.5",
+            "selection": "over",
+            "line": 1.5,
+            "odd": 1.60,
+            "bookmaker_name": "Book B",
+            "captured_at": cutoff - timedelta(minutes=1),
+        },
+        {
+            "market_code": "TOTAL_GOALS_OVER_1_5",
+            "market_name": "Total Goals Over 1.5",
+            "selection": "over",
+            "line": 1.5,
+            "odd": 2.50,
+            "bookmaker_name": "Book C",
+            "captured_at": cutoff + timedelta(seconds=1),
+        },
+    )
+    price = WalkForwardBacktest._market_price(
+        rows,
+        market=Market.TOTAL_GOALS_OVER_1_5,
+        cutoff=cutoff,
+    )
+    assert price == (1.70, "Book A", cutoff - timedelta(minutes=10))
 
 
 def test_duplicate_fixture_gate_fails_closed():
