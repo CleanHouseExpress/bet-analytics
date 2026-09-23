@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 import unicodedata
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -85,7 +84,7 @@ def resolve_match_candidate(
     tolerance: timedelta = MATCH_KICKOFF_TOLERANCE,
 ) -> MatchReconciliation:
     kickoff_at = _utc(kickoff_at)
-    if not math.isfinite(tolerance.total_seconds()) or tolerance.total_seconds() < 0:
+    if tolerance.total_seconds() < 0:
         raise ValueError("INVALID_MATCH_RECONCILIATION_TOLERANCE")
 
     candidate_ids = tuple(candidate.match_id for candidate in candidates)
@@ -157,19 +156,6 @@ def resolve_match_candidate(
             candidate_ids=candidate_ids,
         )
     if len(close) > 1:
-        distances = sorted(
-            (
-                _distance_seconds(candidate, kickoff_at),
-                candidate.match_id,
-            )
-            for candidate in close
-        )
-        if len(distances) >= 2 and distances[0][0] < distances[1][0]:
-            return MatchReconciliation(
-                match_id=distances[0][1],
-                reason=MatchReconciliationReason.NEAREST_KICKOFF,
-                candidate_ids=candidate_ids,
-            )
         raise MatchReconciliationError(
             MatchReconciliationReason.AMBIGUOUS,
             candidate_ids=tuple(candidate.match_id for candidate in close),
