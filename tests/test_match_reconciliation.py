@@ -82,6 +82,32 @@ def test_unique_stage_disambiguates_repeated_fixture():
     assert result.reason is MatchReconciliationReason.UNIQUE_STAGE
 
 
+def test_conflicting_round_and_stage_evidence_blocks():
+    with pytest.raises(
+        MatchReconciliationError,
+        match=MatchReconciliationReason.AMBIGUOUS.value,
+    ):
+        resolve_match_candidate(
+            candidates=(
+                candidate(
+                    10,
+                    hours=-240,
+                    round_number=2,
+                    stage_name="Group Stage",
+                ),
+                candidate(
+                    20,
+                    hours=-480,
+                    round_number=1,
+                    stage_name="Final",
+                ),
+            ),
+            kickoff_at=BASE,
+            round_number=1,
+            stage_name="Group Stage",
+        )
+
+
 def test_single_candidate_inside_tolerance_reconciles():
     result = resolve_match_candidate(
         candidates=(candidate(10, hours=-12),),
