@@ -115,15 +115,28 @@ class FootballDataOrgProvider(FootballDataProvider):
             {"season": str(season_year)},
         )
         teams = payload.get("teams") or []
-        return [
-            ProviderTeam(
-                external_id=str(item["id"]),
-                name=str(item.get("shortName") or item["name"]),
-                country_code=(item.get("area") or {}).get("code"),
-                raw=item,
+        result: list[ProviderTeam] = []
+        for item in teams:
+            primary_name = str(item.get("name") or item.get("shortName") or "").strip()
+            if not primary_name:
+                raise ValueError(f"Team {item.get('id')} is missing name")
+
+            short_name = str(item.get("shortName") or "").strip()
+            aliases = (
+                (short_name,)
+                if short_name and short_name.casefold() != primary_name.casefold()
+                else ()
             )
-            for item in teams
-        ]
+            result.append(
+                ProviderTeam(
+                    external_id=str(item["id"]),
+                    name=primary_name,
+                    country_code=(item.get("area") or {}).get("code"),
+                    raw=item,
+                    aliases=aliases,
+                )
+            )
+        return result
 
     async def get_fixtures(self, season_external_id: str) -> list[ProviderFixture]:
         competition_external_id, season_year = self._require_season_context(
