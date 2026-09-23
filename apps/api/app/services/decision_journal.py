@@ -4,6 +4,7 @@ import hashlib
 import json
 import logging
 import math
+from dataclasses import asdict, is_dataclass
 from datetime import UTC, datetime
 
 from apps.api.app.domain.decision_journal import (
@@ -14,16 +15,24 @@ from apps.api.app.domain.decision_journal import (
 from apps.api.app.domain.features import FeatureSet
 from apps.api.app.domain.market_probability import MarketProbabilityResult
 from apps.api.app.domain.poisson import PoissonResult
-from apps.api.app.domain.risk_assessment import RISK_ENGINE_VERSION, RiskAssessment
+from apps.api.app.domain.risk_assessment import (
+    RISK_ENGINE_VERSION,
+    OpenPosition,
+    RiskAssessment,
+)
 from apps.api.app.domain.value_assessment import VALUE_ENGINE_VERSION, ValueAssessment
 from apps.api.app.services.feature_snapshot import semantic_hash as feature_semantic_hash
 from apps.api.app.services.market_probability_snapshot import (
     semantic_hash as market_probability_semantic_hash,
 )
+from apps.api.app.services.poisson_model import PoissonModel
 from apps.api.app.services.poisson_snapshot import semantic_hash as poisson_semantic_hash
+from apps.api.app.services.risk_engine import RiskEngine
 from apps.api.app.services.value_assessment_snapshot import (
     semantic_hash as value_assessment_semantic_hash,
 )
+from apps.api.app.services.value_engine import ValueEngine
+from apps.api.app.services.market_probability import MarketProbabilityEngine
 
 logger = logging.getLogger(__name__)
 
@@ -40,8 +49,16 @@ def _finite(value: object) -> bool:
     )
 
 
-def _float_key(value: float | None) -> str | None:
-    return None if value is None else format(float(value), ".17g")
+def _contains_non_finite(value: object) -> bool:
+    if is_dataclass(value):
+        return _contains_non_finite(asdict(value))
+    if isinstance(value, float):
+        return not math.isfinite(value)
+    if isinstance(value, dict):
+        return any(_contains_non_finite(item) for item in value.values())
+    if isinstance(value, (tuple, list, set, frozenset)):
+        return any(_contains_non_finite(item) for item in value)
+    return False
 
 
 def _digest(payload: dict[str, object]) -> str:
@@ -69,6 +86,7 @@ class DecisionJournal:
         competition: str | None = None,
         thesis: str | None = None,
         evaluated_at: datetime | None = None,
+        positions: tuple[OpenPosition, ...] = (),
     ) -> DecisionJournalEntry:
         try:
             entry = self._record(
@@ -82,6 +100,7 @@ class DecisionJournal:
                 competition=competition,
                 thesis=thesis,
                 evaluated_at=evaluated_at,
+                positions=positions,
             )
         except DecisionJournalError as exc:
             logger.warning(
@@ -94,19 +113,6 @@ class DecisionJournal:
                 },
             )
             raise
-        logger.info(
-            "decision_journal_recorded",
-            extra={
-                "journal_hash": entry.semantic_hash,
-                "match_id": entry.match_id,
-                "market": entry.market.value,
-                "decision_journal_version": entry.decision_journal_version,
-                "value_decision": entry.value_decision.value,
-                "risk_decision": entry.risk_decision.value,
-                "stake_units": entry.stake_units,
-                "reason": entry.reason,
-            },
-        )
         return entry
 
     def _record(
@@ -122,6 +128,7 @@ class DecisionJournal:
         competition: str | None,
         thesis: str | None,
         evaluated_at: datetime | None,
+        positions: tuple[OpenPosition, ...],
     ) -> DecisionJournalEntry:
         if not isinstance(features, FeatureSet):
             raise DecisionJournalError("INVALID_FEATURE_SET")
@@ -162,32 +169,60 @@ class DecisionJournal:
         ):
             raise DecisionJournalError("VERSION_MISMATCH")
 
-        numeric = (
-            value.p_model,
-            value.p_cons,
-            value.p_break_even,
-            value.market_odd,
-            value.edge_pp,
-            value.ev_cons,
-            value.confidence,
-        )
-        if not all(_finite(item) for item in numeric):
+        if any(
+            _contains_non_finite(artifact)
+            for artifact in (features, poisson, probability, value, risk, positions)
+        ):
             raise DecisionJournalError("INVALID_NUMERIC_VALUE")
         if not _finite(risk.final_stake_units) or not _finite(risk.stake_amount):
             raise DecisionJournalError("INVALID_STAKE")
 
-        # Validate quantitative domains before computing provenance hashes.
-        # Hash serializers intentionally reject NaN/inf; the Journal must
-        # convert those cases into an explicit fail-closed domain error.
-        value_hash = value_assessment_semantic_hash(value)
+        try:
+            feature_hash = feature_semantic_hash(features)
+            poisson_hash = poisson_semantic_hash(poisson)
+            probability_hash = market_probability_semantic_hash(probability)
+            value_hash = value_assessment_semantic_hash(value)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise DecisionJournalError("INVALID_NUMERIC_VALUE") from exc
+
+        # Recompute each deterministic predecessor from the artifact immediately
+        # before it. This makes the journal fail closed when a caller combines
+        # individually valid artifacts that never belonged to the same chain.
+        try:
+            expected_poisson = PoissonModel().calculate(features=features)
+            expected_probability = MarketProbabilityEngine().calculate(
+                poisson=poisson,
+                market=probability.market,
+            )
+            expected_value = ValueEngine().calculate(
+                probability=probability,
+                market_odd=value.market_odd,
+                uncertainty_margin_pp=value.uncertainty_margin_pp,
+                odd_source=value.odd_source,
+                odd_observed_at=value.odd_observed_at,
+            )
+            expected_risk = RiskEngine().calculate(
+                value=value,
+                bankroll_amount=risk.bankroll_amount,
+                unit_percent=risk.unit_percent,
+                positions=positions,
+                exposure_known=risk.exposure_known,
+            )
+        except ValueError as exc:
+            raise DecisionJournalError("PROVENANCE_RECOMPUTE_FAILED") from exc
+
+        if poisson_semantic_hash(expected_poisson) != poisson_hash:
+            raise DecisionJournalError("POISSON_PROVENANCE_MISMATCH")
+        if market_probability_semantic_hash(expected_probability) != probability_hash:
+            raise DecisionJournalError("MARKET_PROBABILITY_PROVENANCE_MISMATCH")
+        if value_assessment_semantic_hash(expected_value) != value_hash:
+            raise DecisionJournalError("VALUE_PROVENANCE_MISMATCH")
+        if expected_risk.semantic_hash != risk.semantic_hash:
+            raise DecisionJournalError("RISK_PROVENANCE_MISMATCH")
         if risk.value_semantic_hash != value_hash:
             raise DecisionJournalError("VALUE_PROVENANCE_MISMATCH")
         if risk.value_decision != value.decision:
             raise DecisionJournalError("VALUE_DECISION_MISMATCH")
-
-        feature_hash = feature_semantic_hash(features)
-        poisson_hash = poisson_semantic_hash(poisson)
-        probability_hash = market_probability_semantic_hash(probability)
         semantic = {
             "match_id": risk.match_id,
             "as_of": risk.as_of.astimezone(UTC).isoformat(),
