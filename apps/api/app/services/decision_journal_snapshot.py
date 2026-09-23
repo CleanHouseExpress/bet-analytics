@@ -33,35 +33,8 @@ def persist_decision_journal_entry(
     entry: DecisionJournalEntry,
 ) -> int:
     payload = _payload(entry)
-    existing = conn.execute(
-        text(
-            "SELECT id, payload FROM decision_journal_entries "
-            "WHERE semantic_hash=:hash"
-        ),
-        {"hash": entry.semantic_hash},
-    ).mappings().first()
-    if existing:
-        old_payload = existing["payload"]
-        if isinstance(old_payload, str):
-            old_payload = json.loads(old_payload)
-        old_payload = dict(old_payload)
-        old_payload.pop("evaluated_at", None)
-        current = dict(payload)
-        current.pop("evaluated_at", None)
-        if old_payload != current:
-            logger.warning(
-                "decision_journal_blocked",
-                extra={
-                    "journal_hash": entry.semantic_hash,
-                    "match_id": entry.match_id,
-                    "market": entry.market.value,
-                    "reason": "DECISION_JOURNAL_SEMANTIC_CONFLICT",
-                },
-            )
-            raise DecisionJournalConflictError(
-                "DECISION_JOURNAL_SEMANTIC_CONFLICT"
-            )
-        return int(existing["id"])
+    if entry.journal_entry_id != entry.semantic_hash:
+        raise DecisionJournalConflictError("DECISION_JOURNAL_IDENTITY_MISMATCH")
 
     sql = """
         INSERT INTO decision_journal_entries (
@@ -80,10 +53,18 @@ def persist_decision_journal_entry(
             :risk_version, :feature_hash, :poisson_hash, :probability_hash,
             :value_hash, :risk_hash, :value_decision, :risk_decision,
             :stake_units, :stake_value, :exposure_known, :payload
-        ) RETURNING id
+        )
     """
     if conn.dialect.name == "postgresql":
         sql = sql.replace(":payload", "CAST(:payload AS JSONB)")
+        sql += " ON CONFLICT (semantic_hash) DO NOTHING RETURNING id"
+    else:
+        sql = sql.replace(
+            "INSERT INTO decision_journal_entries",
+            "INSERT OR IGNORE INTO decision_journal_entries",
+            1,
+        )
+        sql += " RETURNING id"
     row = conn.execute(
         text(sql),
         {
@@ -113,7 +94,37 @@ def persist_decision_journal_entry(
             "exposure_known": entry.exposure_known,
             "payload": json.dumps(payload, sort_keys=True, allow_nan=False),
         },
-    ).scalar_one()
+    ).scalar_one_or_none()
+    if row is None:
+        existing = conn.execute(
+            text(
+                "SELECT id, payload FROM decision_journal_entries "
+                "WHERE semantic_hash=:hash"
+            ),
+            {"hash": entry.semantic_hash},
+        ).mappings().one()
+        old_payload = existing["payload"]
+        if isinstance(old_payload, str):
+            old_payload = json.loads(old_payload)
+        old_payload = dict(old_payload)
+        old_payload.pop("evaluated_at", None)
+        current = dict(payload)
+        current.pop("evaluated_at", None)
+        if old_payload != current:
+            logger.warning(
+                "decision_journal_blocked",
+                extra={
+                    "journal_hash": entry.semantic_hash,
+                    "match_id": entry.match_id,
+                    "market": entry.market.value,
+                    "reason": "DECISION_JOURNAL_SEMANTIC_CONFLICT",
+                },
+            )
+            raise DecisionJournalConflictError(
+                "DECISION_JOURNAL_SEMANTIC_CONFLICT"
+            )
+        return int(existing["id"])
+
     logger.info(
         "decision_journal_recorded",
         extra={
