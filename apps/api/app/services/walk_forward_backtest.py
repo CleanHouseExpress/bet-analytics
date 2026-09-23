@@ -45,8 +45,8 @@ from apps.api.app.services.decision_journal import DecisionJournal
 from apps.api.app.services.feature_engine import _form
 from apps.api.app.services.feature_snapshot import (
     semantic_hash as feature_semantic_hash,
+    semantic_payload as feature_semantic_payload,
 )
-from apps.api.app.services.feature_snapshot import semantic_payload as feature_semantic_payload
 from apps.api.app.services.market_probability import (
     MarketProbabilityEngine,
     MarketProbabilityError,
@@ -388,7 +388,8 @@ class WalkForwardBacktest:
     def __init__(self, session: Session):
         self.session = session
 
-    def run(self, config: BacktestConfig = BacktestConfig()) -> BacktestRun:
+    def run(self, config: BacktestConfig | None = None) -> BacktestRun:
+        config = config or BacktestConfig()
         self._validate_config(config)
         matches = self._load_matches(config)
         self._validate_match_set(matches)
