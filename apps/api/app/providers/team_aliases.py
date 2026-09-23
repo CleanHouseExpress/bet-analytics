@@ -23,28 +23,17 @@ PROVIDER_TEAM_ALIAS_RULES = (
     ProviderTeamAliasRule(
         provider="football-data",
         canonical_name="Atlético-MG",
-        aliases=(
-            "Clube Atlético Mineiro",
-            "Atletico Mineiro",
-            "Mineiro",
-        ),
+        aliases=("Mineiro",),
     ),
     ProviderTeamAliasRule(
         provider="football-data",
         canonical_name="Athletico-PR",
-        aliases=(
-            "Club Athletico Paranaense",
-            "Athletico Paranaense",
-            "Paranaense",
-        ),
+        aliases=("Paranaense",),
     ),
     ProviderTeamAliasRule(
         provider="football-data",
         canonical_name="Remo",
-        aliases=(
-            "Clube do Remo",
-            "Remo",
-        ),
+        aliases=("Clube do Remo",),
     ),
 )
 
