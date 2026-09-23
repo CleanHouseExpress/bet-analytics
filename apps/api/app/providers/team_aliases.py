@@ -85,10 +85,17 @@ def canonical_names_for_provider_team(
     return tuple(sorted(matches))
 
 
-def validate_provider_team_alias_catalog() -> None:
-    ownership: dict[tuple[str, str], str] = {}
-    for rule in PROVIDER_TEAM_ALIAS_RULES:
-        if not rule.provider.strip() or not rule.canonical_name.strip():
+def validate_provider_team_alias_catalog(
+    rules: tuple[ProviderTeamAliasRule, ...] | None = None,
+) -> None:
+    rules = PROVIDER_TEAM_ALIAS_RULES if rules is None else rules
+    alias_ownership: dict[tuple[str, str], str] = {}
+    external_id_ownership: dict[tuple[str, str], str] = {}
+
+    for rule in rules:
+        provider = rule.provider.strip()
+        canonical_name = rule.canonical_name.strip()
+        if not provider or not canonical_name:
             raise ProviderTeamAliasCatalogError("INVALID_PROVIDER_TEAM_ALIAS_RULE")
         if not rule.aliases and not rule.external_ids:
             raise ProviderTeamAliasCatalogError("EMPTY_PROVIDER_TEAM_ALIAS_RULE")
@@ -97,15 +104,31 @@ def validate_provider_team_alias_catalog() -> None:
             normalized = normalize_team_label(alias)
             if not normalized:
                 raise ProviderTeamAliasCatalogError("EMPTY_PROVIDER_TEAM_ALIAS")
-            key = (rule.provider, normalized)
-            previous = ownership.get(key)
-            if previous is not None and previous != rule.canonical_name:
+            key = (provider, normalized)
+            previous = alias_ownership.get(key)
+            if previous is not None and previous != canonical_name:
                 raise ProviderTeamAliasCatalogError(
                     "DUPLICATE_PROVIDER_TEAM_ALIAS:"
-                    f"provider={rule.provider},alias={alias},"
-                    f"canonical_names={previous},{rule.canonical_name}"
+                    f"provider={provider},alias={alias},"
+                    f"canonical_names={previous},{canonical_name}"
                 )
-            ownership[key] = rule.canonical_name
+            alias_ownership[key] = canonical_name
+
+        for external_id in rule.external_ids:
+            normalized_external_id = external_id.strip()
+            if not normalized_external_id:
+                raise ProviderTeamAliasCatalogError(
+                    "EMPTY_PROVIDER_TEAM_EXTERNAL_ID"
+                )
+            key = (provider, normalized_external_id)
+            previous = external_id_ownership.get(key)
+            if previous is not None and previous != canonical_name:
+                raise ProviderTeamAliasCatalogError(
+                    "DUPLICATE_PROVIDER_TEAM_EXTERNAL_ID:"
+                    f"provider={provider},external_id={normalized_external_id},"
+                    f"canonical_names={previous},{canonical_name}"
+                )
+            external_id_ownership[key] = canonical_name
 
 
 validate_provider_team_alias_catalog()
