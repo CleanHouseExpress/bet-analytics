@@ -162,13 +162,6 @@ class DecisionJournal:
         ):
             raise DecisionJournalError("VERSION_MISMATCH")
 
-        value_hash = value_assessment_semantic_hash(value)
-        if risk.value_semantic_hash != value_hash:
-            raise DecisionJournalError("VALUE_PROVENANCE_MISMATCH")
-        if risk.value_decision != value.decision:
-            raise DecisionJournalError("VALUE_DECISION_MISMATCH")
-        if not _finite(risk.final_stake_units) or not _finite(risk.stake_amount):
-            raise DecisionJournalError("INVALID_STAKE")
         numeric = (
             value.p_model,
             value.p_cons,
@@ -180,6 +173,17 @@ class DecisionJournal:
         )
         if not all(_finite(item) for item in numeric):
             raise DecisionJournalError("INVALID_NUMERIC_VALUE")
+        if not _finite(risk.final_stake_units) or not _finite(risk.stake_amount):
+            raise DecisionJournalError("INVALID_STAKE")
+
+        # Validate quantitative domains before computing provenance hashes.
+        # Hash serializers intentionally reject NaN/inf; the Journal must
+        # convert those cases into an explicit fail-closed domain error.
+        value_hash = value_assessment_semantic_hash(value)
+        if risk.value_semantic_hash != value_hash:
+            raise DecisionJournalError("VALUE_PROVENANCE_MISMATCH")
+        if risk.value_decision != value.decision:
+            raise DecisionJournalError("VALUE_DECISION_MISMATCH")
 
         feature_hash = feature_semantic_hash(features)
         poisson_hash = poisson_semantic_hash(poisson)
