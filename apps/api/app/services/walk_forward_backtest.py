@@ -274,6 +274,12 @@ class HistoricalFeatureEngine:
         )
         ordering = (Match.kickoff_at.desc(), Match.id.desc())
 
+        def settled_before_cutoff(match: Match) -> bool:
+            return _historical_settled_at(
+                match.kickoff_at,
+                match.finished_at,
+            ) <= as_of
+
         def history(team_id: int, *, venue: str | None = None) -> list[Match]:
             predicates = [eligible]
             if venue == "home":
@@ -291,21 +297,27 @@ class HistoricalFeatureEngine:
                 select(Match)
                 .where(and_(*predicates), Match.id != match_id)
                 .order_by(*ordering)
-                .limit(10)
             )
-            return list(self.session.scalars(statement))
+            observed = [
+                match
+                for match in self.session.scalars(statement)
+                if settled_before_cutoff(match)
+            ]
+            return observed[:10]
 
         home_all = history(target.home_team_id)
         away_all = history(target.away_team_id)
         home_home = history(target.home_team_id, venue="home")
         away_away = history(target.away_team_id, venue="away")
-        baseline_matches = list(
-            self.session.scalars(
+        baseline_matches = [
+            match
+            for match in self.session.scalars(
                 select(Match)
                 .where(eligible, Match.id != match_id)
                 .order_by(*ordering)
             )
-        )
+            if settled_before_cutoff(match)
+        ]
 
         if baseline_matches:
             games = len(baseline_matches)
