@@ -222,6 +222,8 @@ def _setup_walk_forward_history(session):
         "season_id": season_id,
         "target_match_id": target_match_id,
         "target_kickoff": target_kickoff,
+        "target_round_id": target_round_id,
+        "home_team_id": home_team,
     }
 
 
@@ -229,6 +231,31 @@ def test_walk_forward_uses_event_chronology_without_ingestion_time_leakage():
     with SessionLocal() as session:
         ids = _setup_walk_forward_history(session)
         as_of = ids["target_kickoff"] - timedelta(seconds=60)
+        late_opponent = session.execute(
+            text(
+                """
+                INSERT INTO teams (
+                    name, country_code, created_at, updated_at
+                ) VALUES (
+                    'BETS-9 Late Opponent', 'BRA', :now, :now
+                ) RETURNING id
+                """
+            ),
+            {"now": datetime.now(UTC)},
+        ).scalar_one()
+        _insert_fixture(
+            session,
+            competition_id=ids["competition_id"],
+            season_id=ids["season_id"],
+            round_id=ids["target_round_id"],
+            home_team_id=ids["home_team_id"],
+            away_team_id=late_opponent,
+            kickoff_at=as_of - timedelta(minutes=30),
+            home_score=9,
+            away_score=0,
+            finished_at=as_of + timedelta(hours=2),
+        )
+
         context = MatchContext(
             match_id=ids["target_match_id"],
             competition_id=ids["competition_id"],
@@ -252,6 +279,7 @@ def test_walk_forward_uses_event_chronology_without_ingestion_time_leakage():
         assert production.home_last10.games == 0
         assert FeatureReason.INSUFFICIENT_TEAM_HISTORY in production.reasons
         assert historical.home_last10.games == 10
+        assert historical.home_last10.gf_per_game == 3.0
         assert historical.away_last10.games == 10
         assert historical.home_home10.games == 10
         assert historical.away_away10.games == 10
