@@ -47,6 +47,13 @@ def test_full_historical_schema_exists() -> None:
     assert EXPECTED_TABLES.issubset(tables)
 
 
+def test_competitions_track_explicit_format_provenance() -> None:
+    inspector = inspect(engine)
+    columns = {column["name"] for column in inspector.get_columns("competitions")}
+
+    assert "competition_type_source" in columns
+
+
 def test_matches_has_historical_context_columns() -> None:
     inspector = inspect(engine)
     columns = {column["name"] for column in inspector.get_columns("matches")}
