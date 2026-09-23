@@ -130,7 +130,7 @@ def main() -> None:
         import_results = {}
         for path in CSV_PATHS:
             result = BrasileiraoCsvImporter(session).import_file(path)
-            season = path.name.split("_")[4]
+            season = path.name.split("_")[3]
             import_results[season] = {
                 "rows_seen": result.rows_seen,
                 "matches_created": result.matches_created,
