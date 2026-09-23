@@ -1,7 +1,6 @@
+import logging
 from dataclasses import replace
 from datetime import UTC, datetime
-
-import logging
 
 import pytest
 
