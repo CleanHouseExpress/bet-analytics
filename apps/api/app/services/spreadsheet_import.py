@@ -419,8 +419,12 @@ class SpreadsheetImporter:
         return self.db.execute(
             text(
                 """
-                INSERT INTO competitions (name, competition_type, created_at, updated_at)
-                VALUES (:name, 'league', now(), now()) RETURNING id
+                INSERT INTO competitions (
+                    name, competition_type, competition_type_source,
+                    created_at, updated_at
+                )
+                VALUES (:name, 'unknown', NULL, now(), now())
+                RETURNING id
                 """
             ),
             {"name": name},
