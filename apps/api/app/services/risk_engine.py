@@ -20,7 +20,6 @@ from apps.api.app.domain.value_assessment import (
     ValueAssessment,
     ValueDecision,
 )
-
 from apps.api.app.services.value_assessment_snapshot import (
     semantic_hash as value_assessment_semantic_hash,
 )
