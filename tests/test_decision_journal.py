@@ -196,3 +196,122 @@ def test_blocked_observability_event(caplog):
         item for item in caplog.records if item.message == "decision_journal_blocked"
     )
     assert record.reason == "VALUE_PROVENANCE_MISMATCH"
+
+
+@pytest.mark.parametrize(
+    ("odd", "expected_decision"),
+    [
+        (1.05, "NO_GO"),
+        (1.12, "OBSERVAR"),
+        (1.20, "GO_PROTEGIDO"),
+        (1.30, "GO"),
+        (1.50, "GO_FORTE"),
+    ],
+)
+def test_journal_records_value_decision_bands(odd, expected_decision):
+    entry, _ = _record(odd=odd)
+    assert entry.value_decision.value == expected_decision
+    if expected_decision in {"NO_GO", "OBSERVAR"}:
+        assert entry.stake_units == 0
+
+
+def test_risk_semantic_change_creates_new_journal_entry():
+    features, poisson, probability, value, risk = _chain(exposure_known=True)
+    known = DecisionJournal().record(
+        features=features,
+        poisson=poisson,
+        probability=probability,
+        value=value,
+        risk=risk,
+        analysis_type=AnalysisType.PRE_MATCH,
+        match_type="LEAGUE",
+    )
+    unknown_risk = RiskEngine().calculate(
+        value=value,
+        bankroll_amount=500,
+        exposure_known=False,
+    )
+    unknown = DecisionJournal().record(
+        features=features,
+        poisson=poisson,
+        probability=probability,
+        value=value,
+        risk=unknown_risk,
+        analysis_type=AnalysisType.PRE_MATCH,
+        match_type="LEAGUE",
+    )
+    assert known.value_semantic_hash == unknown.value_semantic_hash
+    assert known.risk_semantic_hash != unknown.risk_semantic_hash
+    assert known.semantic_hash != unknown.semantic_hash
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "reason"),
+    [
+        ("p_model", float("nan"), "INVALID_NUMERIC_VALUE"),
+        ("p_cons", float("inf"), "INVALID_NUMERIC_VALUE"),
+        ("market_odd", float("nan"), "INVALID_NUMERIC_VALUE"),
+        ("confidence", float("-inf"), "INVALID_NUMERIC_VALUE"),
+    ],
+)
+def test_invalid_numeric_value_fails_closed(field, value, reason):
+    features, poisson, probability, assessment, risk = _chain()
+    invalid_value = replace(assessment, **{field: value})
+    with pytest.raises(DecisionJournalError, match=reason):
+        DecisionJournal().record(
+            features=features,
+            poisson=poisson,
+            probability=probability,
+            value=invalid_value,
+            risk=risk,
+            analysis_type=AnalysisType.PRE_MATCH,
+            match_type="LEAGUE",
+        )
+
+
+def test_market_mismatch_fails_closed():
+    features, poisson, probability, value, risk = _chain()
+    invalid_risk = replace(risk, market=Market.BTTS_YES)
+    with pytest.raises(DecisionJournalError, match="MARKET_MISMATCH"):
+        DecisionJournal().record(
+            features=features,
+            poisson=poisson,
+            probability=probability,
+            value=value,
+            risk=invalid_risk,
+            analysis_type=AnalysisType.PRE_MATCH,
+            match_type="LEAGUE",
+        )
+
+
+def test_version_mismatch_fails_closed():
+    features, poisson, probability, value, risk = _chain()
+    invalid_probability = replace(probability, model_version="poisson-v999")
+    with pytest.raises(DecisionJournalError, match="VERSION_MISMATCH"):
+        DecisionJournal().record(
+            features=features,
+            poisson=poisson,
+            probability=invalid_probability,
+            value=value,
+            risk=risk,
+            analysis_type=AnalysisType.PRE_MATCH,
+            match_type="LEAGUE",
+        )
+
+
+def test_semantic_identity_includes_analysis_context():
+    first, chain = _record()
+    features, poisson, probability, value, risk = chain
+    second = DecisionJournal().record(
+        features=features,
+        poisson=poisson,
+        probability=probability,
+        value=value,
+        risk=risk,
+        analysis_type=AnalysisType.LIVE,
+        match_type="LEAGUE",
+        competition="Brasileirao",
+        thesis="value-v1",
+        evaluated_at=first.evaluated_at,
+    )
+    assert first.semantic_hash != second.semantic_hash
