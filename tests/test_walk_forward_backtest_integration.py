@@ -4,7 +4,11 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import text
 
 from apps.api.app.core.database import SessionLocal
-from apps.api.app.domain.backtest import BacktestConfig, BacktestEvaluationStatus
+from apps.api.app.domain.backtest import (
+    BacktestConfig,
+    BacktestEvaluationStatus,
+    SeasonCoverageManifest,
+)
 from apps.api.app.domain.features import FeatureReason
 from apps.api.app.domain.market_probability import Market
 from apps.api.app.domain.match_context import (
@@ -297,6 +301,18 @@ def test_walk_forward_full_chain_is_deterministic_and_persistable():
             uncertainty_margin_pp=3,
             as_of_offset_seconds=60,
             min_sample_for_review=100,
+            coverage_manifest=(
+                SeasonCoverageManifest(
+                    season="2099",
+                    minimum_matches=21,
+                    expected_teams=22,
+                    minimum_matches_by_round=(
+                        *((round_number, 2) for round_number in range(1, 11)),
+                        (11, 1),
+                    ),
+                    source="tests/test_walk_forward_backtest_integration.py",
+                ),
+            ),
         )
         engine = WalkForwardBacktest(session)
         first = engine.run(config)
