@@ -22,6 +22,7 @@ from apps.api.app.domain.risk_assessment import (
 )
 from apps.api.app.domain.value_assessment import VALUE_ENGINE_VERSION, ValueAssessment
 from apps.api.app.services.feature_snapshot import semantic_hash as feature_semantic_hash
+from apps.api.app.services.market_probability import MarketProbabilityEngine
 from apps.api.app.services.market_probability_snapshot import (
     semantic_hash as market_probability_semantic_hash,
 )
@@ -32,7 +33,6 @@ from apps.api.app.services.value_assessment_snapshot import (
     semantic_hash as value_assessment_semantic_hash,
 )
 from apps.api.app.services.value_engine import ValueEngine
-from apps.api.app.services.market_probability import MarketProbabilityEngine
 
 logger = logging.getLogger(__name__)
 
