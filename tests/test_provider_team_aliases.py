@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 from sqlalchemy import text
 
 from apps.api.app.core.database import SessionLocal
@@ -13,6 +14,8 @@ from apps.api.app.providers.contracts import (
 )
 from apps.api.app.providers.team_aliases import (
     PROVIDER_TEAM_ALIAS_CATALOG_VERSION,
+    ProviderTeamAliasCatalogError,
+    ProviderTeamAliasRule,
     canonical_names_for_provider_team,
     validate_provider_team_alias_catalog,
 )
@@ -250,3 +253,43 @@ def test_stale_provider_mapping_conflicting_with_catalog_fails_closed() -> None:
             raise AssertionError("stale provider mapping must fail closed")
 
         db.rollback()
+
+
+def test_catalog_rejects_conflicting_external_id_ownership() -> None:
+    rules = (
+        ProviderTeamAliasRule(
+            provider="football-data",
+            canonical_name="Team A",
+            aliases=("Alias A",),
+            external_ids=("shared-id",),
+        ),
+        ProviderTeamAliasRule(
+            provider="football-data",
+            canonical_name="Team B",
+            aliases=("Alias B",),
+            external_ids=("shared-id",),
+        ),
+    )
+
+    with pytest.raises(
+        ProviderTeamAliasCatalogError,
+        match="DUPLICATE_PROVIDER_TEAM_EXTERNAL_ID",
+    ):
+        validate_provider_team_alias_catalog(rules)
+
+
+def test_catalog_rejects_blank_external_id() -> None:
+    rules = (
+        ProviderTeamAliasRule(
+            provider="football-data",
+            canonical_name="Team A",
+            aliases=(),
+            external_ids=("   ",),
+        ),
+    )
+
+    with pytest.raises(
+        ProviderTeamAliasCatalogError,
+        match="EMPTY_PROVIDER_TEAM_EXTERNAL_ID",
+    ):
+        validate_provider_team_alias_catalog(rules)
